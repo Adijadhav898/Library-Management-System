@@ -98,9 +98,12 @@ public class BookDto : BaseDto
     public string? Subtitle { get; set; }
     public string ISBN { get; set; } = string.Empty;
     public string? Description { get; set; }
+    public string? Edition { get; set; }
+    public int? PublicationYear { get; set; }
+    public int? Pages { get; set; }
     public Guid UserId { get; set; }
     public string? Language { get; set; }
-    public int? Pages { get; set; }
+    
     public string? CoverImageUrl { get; set; }
     public Guid CategoryId { get; set; }
     public string CategoryName { get; set; } = string.Empty;
@@ -109,7 +112,7 @@ public class BookDto : BaseDto
     public List<AuthorDto> Authors { get; set; } = new();
     public int TotalCopies { get; set; }
     public int AvailableCopies { get; set; }
-    public string? Edition { get; set; }
+    
 }
 
 public class BookSummaryDto

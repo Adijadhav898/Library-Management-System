@@ -7,6 +7,7 @@ namespace LMS.Application.Interfaces;
 public interface IFineRepository : IGenericRepository<Fine>
 {
     Task<PaginatedResult<Fine>> GetPagedAsync(PaginationRequest request, Guid? memberId = null, FineStatus? status = null, CancellationToken cancellationToken = default);
+    Task<IEnumerable<Fine>> GetByLoanAsync(Guid loanId, CancellationToken cancellationToken = default);
     Task<IEnumerable<Fine>> GetByMemberAsync(Guid memberId, CancellationToken cancellationToken = default);
     Task<IEnumerable<Fine>> GetOutstandingByMemberAsync(Guid memberId, CancellationToken cancellationToken = default);
     Task<decimal> GetTotalOutstandingByMemberAsync(Guid memberId, CancellationToken cancellationToken = default);

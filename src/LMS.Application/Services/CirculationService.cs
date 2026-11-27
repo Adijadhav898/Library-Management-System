@@ -14,6 +14,7 @@ public class CirculationService : ICirculationService
     private readonly IFineRepository _fineRepository;
     private readonly ISettingRepository _settingRepository;
     private readonly IBookRepository _bookRepository;
+    private readonly IPaymentRepository _paymentRepository;
 
     public CirculationService(
         ILoanRepository loanRepository,
@@ -22,7 +23,8 @@ public class CirculationService : ICirculationService
         IReservationRepository reservationRepository,
         IFineRepository fineRepository,
         ISettingRepository settingRepository,
-        IBookRepository bookRepository)
+        IBookRepository bookRepository,
+        IPaymentRepository paymentRepository)
     {
         _loanRepository = loanRepository;
         _bookCopyRepository = bookCopyRepository;
@@ -31,12 +33,13 @@ public class CirculationService : ICirculationService
         _fineRepository = fineRepository;
         _settingRepository = settingRepository;
         _bookRepository = bookRepository;
+        _paymentRepository = paymentRepository;
     }
 
     // Loans
     public async Task<PaginatedResult<LoanDto>> GetLoansAsync(PaginationRequest request, Guid? memberId = null, Guid? bookCopyId = null, LoanStatus? status = null, bool? isOverdue = null, CancellationToken cancellationToken = default)
     {
-        var (loans, totalCount) = await _loanRepository.GetPagedAsync(request, memberId, bookCopyId, status, cancellationToken);
+        var (loans, totalCount) = await _loanRepository.GetPagedAsync(request, memberId, bookCopyId, status, null, cancellationToken);
 
         // Filter by isOverdue if specified
         if (isOverdue.HasValue && isOverdue.Value)
@@ -62,8 +65,8 @@ public class CirculationService : ICirculationService
                 Status = loan.Status,
                 RenewalCount = loan.RenewalCount,
                 MaxRenewals = loan.MaxRenewals,
-                IssuedByUserId = loan.IssuedByUserId,
-                IssuedByName = loan.IssuedByUser != null ? $"{loan.IssuedByUser.FirstName} {loan.IssuedByUser.LastName}" : string.Empty,
+                IssuedByUserId = loan.IssuedById,
+                IssuedByName = loan.IssuedBy != null ? $"{loan.IssuedBy.FirstName} {loan.IssuedBy.LastName}" : string.Empty,
                 ReturnedByUserId = loan.ReturnedByUserId,
                 ReturnedByName = loan.ReturnedByUser != null ? $"{loan.ReturnedByUser.FirstName} {loan.ReturnedByUser.LastName}" : string.Empty,
                 Notes = loan.Notes,
@@ -101,8 +104,8 @@ public class CirculationService : ICirculationService
             Status = loan.Status,
             RenewalCount = loan.RenewalCount,
             MaxRenewals = loan.MaxRenewals,
-            IssuedByUserId = loan.IssuedByUserId,
-            IssuedByName = loan.IssuedByUser != null ? $"{loan.IssuedByUser.FirstName} {loan.IssuedByUser.LastName}" : string.Empty,
+            IssuedByUserId = loan.IssuedById,
+            IssuedByName = loan.IssuedBy != null ? $"{loan.IssuedBy.FirstName} {loan.IssuedBy.LastName}" : string.Empty,
             ReturnedByUserId = loan.ReturnedByUserId,
             ReturnedByName = loan.ReturnedByUser != null ? $"{loan.ReturnedByUser.FirstName} {loan.ReturnedByUser.LastName}" : string.Empty,
             Notes = loan.Notes,
@@ -116,7 +119,7 @@ public class CirculationService : ICirculationService
         if (member == null)
             throw new InvalidOperationException("Member not found");
 
-        if (!member.IsActive)
+        if (member.IsBlocked)
             throw new InvalidOperationException("Member is not active");
 
         if (member.ExpiryDate < DateTime.UtcNow)
@@ -138,7 +141,7 @@ public class CirculationService : ICirculationService
             throw new InvalidOperationException($"Member has reached maximum loan limit ({maxLoans})");
 
         // Check for unpaid fines
-        var unpaidFines = await _fineRepository.GetTotalUnpaidByMemberAsync(request.MemberId, cancellationToken);
+        var unpaidFines = await _fineRepository.GetTotalOutstandingByMemberAsync(request.MemberId, cancellationToken);
         if (unpaidFines > 0)
         {
             var blockOnFines = await _settingRepository.GetValueAsync("BlockLoansOnUnpaidFines", cancellationToken);
@@ -163,20 +166,20 @@ public class CirculationService : ICirculationService
             Status = LoanStatus.Active,
             RenewalCount = 0,
             MaxRenewals = maxRenewals,
-            IssuedByUserId = issuedById,
+            IssuedById = issuedById,
             Notes = request.Notes,
             CreatedAt = DateTime.UtcNow
         };
 
         // Update book copy status
-        bookCopy.Status = CopyStatus.OnLoan;
+        bookCopy.Status = CopyStatus.Issued;
         bookCopy.UpdatedAt = DateTime.UtcNow;
 
         await _loanRepository.AddAsync(loan, cancellationToken);
         await _bookCopyRepository.UpdateAsync(bookCopy, cancellationToken);
 
         // Check if there's a reservation for this book copy
-        var reservations = await _reservationRepository.GetActiveByBookCopyAsync(request.BookCopyId, cancellationToken);
+        var reservations = await _reservationRepository.GetActiveByBookAsync(bookCopy.BookId, cancellationToken);
         var reservation = reservations.FirstOrDefault();
         if (reservation != null)
         {
@@ -202,7 +205,11 @@ public class CirculationService : ICirculationService
             throw new InvalidOperationException("Maximum renewals reached");
 
         // Check if there's a reservation for this book
-        var reservations = await _reservationRepository.GetActiveByBookCopyAsync(loan.BookCopyId, cancellationToken);
+        var renewCopy = await _bookCopyRepository.GetByIdAsync(loan.BookCopyId, cancellationToken);
+        if (renewCopy == null)
+            throw new InvalidOperationException("Book copy not found");
+
+        var reservations = await _reservationRepository.GetActiveByBookAsync(renewCopy.BookId, cancellationToken);
         if (reservations.Any())
             throw new InvalidOperationException("Book has active reservations, cannot renew");
 
@@ -211,7 +218,6 @@ public class CirculationService : ICirculationService
 
         loan.DueDate = loan.DueDate.AddDays(loanPeriodDays);
         loan.RenewalCount++;
-        loan.Status = LoanStatus.Renewed;
         loan.UpdatedAt = DateTime.UtcNow;
 
         await _loanRepository.UpdateAsync(loan, cancellationToken);
@@ -255,7 +261,7 @@ public class CirculationService : ICirculationService
         // Check for overdue fine
         if (loan.DueDate < DateTime.UtcNow)
         {
-            await CreateOverdueFineAsync(loan, cancellationToken);
+            await CreateOverdueFineAsync(loan, null, cancellationToken);
         }
 
         return await GetLoanByIdAsync(request.LoanId, cancellationToken);
@@ -279,8 +285,8 @@ public class CirculationService : ICirculationService
             Status = loan.Status,
             RenewalCount = loan.RenewalCount,
             MaxRenewals = loan.MaxRenewals,
-            IssuedByUserId = loan.IssuedByUserId,
-            IssuedByName = loan.IssuedByUser != null ? $"{loan.IssuedByUser.FirstName} {loan.IssuedByUser.LastName}" : string.Empty,
+            IssuedByUserId = loan.IssuedById,
+            IssuedByName = loan.IssuedBy != null ? $"{loan.IssuedBy.FirstName} {loan.IssuedBy.LastName}" : string.Empty,
             ReturnedByUserId = loan.ReturnedByUserId,
             ReturnedByName = loan.ReturnedByUser != null ? $"{loan.ReturnedByUser.FirstName} {loan.ReturnedByUser.LastName}" : string.Empty,
             Notes = loan.Notes,
@@ -318,8 +324,8 @@ public class CirculationService : ICirculationService
                 BookTitle = reservation.Book?.Title ?? string.Empty,
                 BookCopyId = reservation.BookCopyId,
                 Barcode = reservation.BookCopy?.Barcode ?? string.Empty,
-                ReservationDate = reservation.ReservationDate,
-                ExpiryDate = reservation.ExpiryDate,
+                ReservationDate = reservation.ReservedAt,
+                ExpiryDate = reservation.ExpiresAt,
                 Status = reservation.Status,
                 FulfilledAt = reservation.FulfilledAt,
                 Notes = reservation.Notes,
@@ -352,8 +358,8 @@ public class CirculationService : ICirculationService
             BookTitle = reservation.Book?.Title ?? string.Empty,
             BookCopyId = reservation.BookCopyId,
             Barcode = reservation.BookCopy?.Barcode ?? string.Empty,
-            ReservationDate = reservation.ReservationDate,
-            ExpiryDate = reservation.ExpiryDate,
+            ReservationDate = reservation.ReservedAt,
+            ExpiryDate = reservation.ExpiresAt,
             Status = reservation.Status,
             FulfilledAt = reservation.FulfilledAt,
             Notes = reservation.Notes,
@@ -396,8 +402,8 @@ public class CirculationService : ICirculationService
                 Id = Guid.NewGuid(),
                 MemberId = request.MemberId,
                 BookId = request.BookId,
-                ReservationDate = DateTime.UtcNow,
-                ExpiryDate = DateTime.UtcNow.AddDays(expiryDays),
+                ReservedAt = DateTime.UtcNow,
+                ExpiresAt = DateTime.UtcNow.AddDays(expiryDays),
                 Status = ReservationStatus.Pending,
                 Notes = request.Notes,
                 CreatedAt = DateTime.UtcNow
@@ -416,8 +422,8 @@ public class CirculationService : ICirculationService
                 MemberId = request.MemberId,
                 BookId = request.BookId,
                 BookCopyId = bookCopy.Id,
-                ReservationDate = DateTime.UtcNow,
-                ExpiryDate = DateTime.UtcNow.AddDays(3),
+                ReservedAt = DateTime.UtcNow,
+                ExpiresAt = DateTime.UtcNow.AddDays(3),
                 Status = ReservationStatus.Fulfilled,
                 FulfilledAt = DateTime.UtcNow,
                 Notes = request.Notes,
@@ -547,7 +553,7 @@ public class CirculationService : ICirculationService
             LoanId = request.LoanId,
             FineType = request.FineType,
             Amount = request.Amount,
-            Status = FineStatus.Pending,
+            Status = FineStatus.Unpaid,
             Description = request.Description,
             CreatedAt = DateTime.UtcNow
         };
@@ -602,7 +608,7 @@ public class CirculationService : ICirculationService
     // Payments
     public async Task<PaginatedResult<PaymentDto>> GetPaymentsAsync(PaginationRequest request, Guid? fineId = null, DateTime? fromDate = null, DateTime? toDate = null, CancellationToken cancellationToken = default)
     {
-        var (payments, totalCount) = await _fineRepository.GetPaymentsPagedAsync(request, fineId, fromDate, toDate, cancellationToken);
+        var (payments, totalCount) = await _paymentRepository.GetPagedAsync(request, fineId, fromDate, toDate, cancellationToken);
 
         var paymentDtos = payments.Select(p => new PaymentDto
         {
@@ -612,10 +618,10 @@ public class CirculationService : ICirculationService
             MemberName = p.Fine?.Member?.User != null ? $"{p.Fine.Member.User.FirstName} {p.Fine.Member.User.LastName}" : string.Empty,
             Amount = p.Amount,
             PaymentMode = p.PaymentMode,
-            TransactionId = p.TransactionId,
-            ReceivedByUserId = p.ReceivedByUserId,
-            ReceivedByName = p.ReceivedByUser != null ? $"{p.ReceivedByUser.FirstName} {p.ReceivedByUser.LastName}" : string.Empty,
-            PaymentDate = p.PaymentDate,
+            TransactionId = p.TransactionRef ?? string.Empty,
+            ReceivedByUserId = p.ReceivedById,
+            ReceivedByName = p.ReceivedBy != null ? $"{p.ReceivedBy.FirstName} {p.ReceivedBy.LastName}" : string.Empty,
+            PaymentDate = p.PaidAt,
             Notes = p.Notes,
             CreatedAt = p.CreatedAt
         }).ToList();
@@ -648,14 +654,14 @@ public class CirculationService : ICirculationService
             FineId = request.FineId,
             Amount = request.Amount,
             PaymentMode = request.PaymentMode,
-            TransactionId = request.TransactionId,
-            ReceivedByUserId = receivedById,
-            PaymentDate = DateTime.UtcNow,
+            TransactionRef = request.TransactionId,
+            ReceivedById = receivedById,
+            PaidAt = DateTime.UtcNow,
             Notes = request.Notes,
             CreatedAt = DateTime.UtcNow
         };
 
-        await _fineRepository.AddPaymentAsync(payment, cancellationToken);
+        await _paymentRepository.AddAsync(payment, cancellationToken);
 
         // Update fine paid amount and status
         fine.PaidAmount += request.Amount;
@@ -665,7 +671,7 @@ public class CirculationService : ICirculationService
         }
         else if (fine.PaidAmount > 0)
         {
-            fine.Status = FineStatus.Partial;
+            fine.Status = FineStatus.PartiallyPaid;
         }
         fine.UpdatedAt = DateTime.UtcNow;
 
@@ -679,10 +685,10 @@ public class CirculationService : ICirculationService
             MemberName = fine.Member?.User != null ? $"{fine.Member.User.FirstName} {fine.Member.User.LastName}" : string.Empty,
             Amount = payment.Amount,
             PaymentMode = payment.PaymentMode,
-            TransactionId = payment.TransactionId,
-            ReceivedByUserId = payment.ReceivedByUserId,
-            ReceivedByName = payment.ReceivedByUser != null ? $"{payment.ReceivedByUser.FirstName} {payment.ReceivedByUser.LastName}" : string.Empty,
-            PaymentDate = payment.PaymentDate,
+            TransactionId = payment.TransactionRef ?? string.Empty,
+            ReceivedByUserId = payment.ReceivedById,
+            ReceivedByName = payment.ReceivedBy != null ? $"{payment.ReceivedBy.FirstName} {payment.ReceivedBy.LastName}" : string.Empty,
+            PaymentDate = payment.PaidAt,
             Notes = payment.Notes,
             CreatedAt = payment.CreatedAt
         };
@@ -718,7 +724,7 @@ public class CirculationService : ICirculationService
                 LoanId = loan.Id,
                 FineType = FineType.Overdue,
                 Amount = daysOverdue * finePerDay.Value,
-                Status = FineStatus.Pending,
+                Status = FineStatus.Unpaid,
                 Description = $"Overdue fine for loan {loan.Id} - {daysOverdue} days overdue",
                 CreatedAt = DateTime.UtcNow
             };

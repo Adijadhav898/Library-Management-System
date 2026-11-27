@@ -26,12 +26,9 @@ public class ReturnLoanRequestValidator : AbstractValidator<ReturnLoanRequest>
         RuleFor(x => x.LoanId)
             .NotEmpty().WithMessage("Loan ID is required");
 
-        RuleFor(x => x.ReturnedById)
-            .NotEmpty().WithMessage("Returned by ID is required");
-
-        RuleFor(x => x.ConditionNotes)
+        RuleFor(x => x.Notes)
             .MaximumLength(1000).WithMessage("Condition notes cannot exceed 1000 characters")
-            .When(x => !string.IsNullOrWhiteSpace(x.ConditionNotes));
+            .When(x => !string.IsNullOrWhiteSpace(x.Notes));
     }
 }
 
@@ -41,9 +38,6 @@ public class RenewLoanRequestValidator : AbstractValidator<RenewLoanRequest>
     {
         RuleFor(x => x.LoanId)
             .NotEmpty().WithMessage("Loan ID is required");
-
-        RuleFor(x => x.RenewedById)
-            .NotEmpty().WithMessage("Renewed by ID is required");
     }
 }
 
@@ -84,16 +78,12 @@ public class CreateFineRequestValidator : AbstractValidator<CreateFineRequest>
         RuleFor(x => x.Amount)
             .GreaterThan(0).WithMessage("Amount must be greater than 0");
 
-        RuleFor(x => x.Type)
+        RuleFor(x => x.FineType)
             .IsInEnum().WithMessage("Invalid fine type");
 
-        RuleFor(x => x.Reason)
-            .NotEmpty().WithMessage("Reason is required")
-            .MaximumLength(500).WithMessage("Reason cannot exceed 500 characters");
-
-        RuleFor(x => x.IncurredDate)
-            .NotEmpty().WithMessage("Incurred date is required")
-            .LessThanOrEqualTo(DateTime.Today).WithMessage("Incurred date cannot be in the future");
+        RuleFor(x => x.Description)
+            .NotEmpty().WithMessage("Description is required")
+            .MaximumLength(500).WithMessage("Description cannot exceed 500 characters");
     }
 }
 

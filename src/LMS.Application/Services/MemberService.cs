@@ -29,13 +29,13 @@ public class MemberService : IMemberService
 
     public async Task<PaginatedResult<MemberDto>> GetAllAsync(PaginationRequest request, bool? isActive = null, Guid? memberTypeId = null, string? search = null, CancellationToken cancellationToken = default)
     {
-        var (members, totalCount) = await _memberRepository.GetPagedAsync(request, search, memberTypeId, isActive, cancellationToken);
+        var (members, totalCount) = await _memberRepository.GetPagedAsync(request, isActive, memberTypeId, search, cancellationToken);
 
         var memberDtos = new List<MemberDto>();
         foreach (var member in members)
         {
             var activeLoansCount = await _loanRepository.GetActiveLoansCountByMemberAsync(member.Id, cancellationToken);
-            var unpaidFines = await _fineRepository.GetTotalUnpaidByMemberAsync(member.Id, cancellationToken);
+            var unpaidFines = await _fineRepository.GetTotalOutstandingByMemberAsync(member.Id, cancellationToken);
 
             memberDtos.Add(new MemberDto
             {
@@ -46,7 +46,7 @@ public class MemberService : IMemberService
                 MemberTypeName = member.MemberType?.Name ?? string.Empty,
                 JoinDate = member.JoinDate,
                 ExpiryDate = member.ExpiryDate,
-                IsActive = member.IsActive,
+                IsActive = !member.IsBlocked,
                 User = member.User != null ? new UserDto
                 {
                     Id = member.User.Id,
@@ -83,7 +83,7 @@ public class MemberService : IMemberService
             return null;
 
         var activeLoansCount = await _loanRepository.GetActiveLoansCountByMemberAsync(member.Id, cancellationToken);
-        var unpaidFines = await _fineRepository.GetTotalUnpaidByMemberAsync(member.Id, cancellationToken);
+        var unpaidFines = await _fineRepository.GetTotalOutstandingByMemberAsync(member.Id, cancellationToken);
 
         return new MemberDto
         {
@@ -94,7 +94,7 @@ public class MemberService : IMemberService
             MemberTypeName = member.MemberType?.Name ?? string.Empty,
             JoinDate = member.JoinDate,
             ExpiryDate = member.ExpiryDate,
-            IsActive = member.IsActive,
+            IsActive = !member.IsBlocked,
             User = member.User != null ? new UserDto
             {
                 Id = member.User.Id,
@@ -117,12 +117,12 @@ public class MemberService : IMemberService
 
     public async Task<MemberDto?> GetByMemberNumberAsync(string memberNumber, CancellationToken cancellationToken = default)
     {
-        var member = await _memberRepository.GetByMembershipNumberAsync(memberNumber, cancellationToken);
+        var member = await _memberRepository.GetByMemberNumberAsync(memberNumber, cancellationToken);
         if (member == null)
             return null;
 
         var activeLoansCount = await _loanRepository.GetActiveLoansCountByMemberAsync(member.Id, cancellationToken);
-        var unpaidFines = await _fineRepository.GetTotalUnpaidByMemberAsync(member.Id, cancellationToken);
+        var unpaidFines = await _fineRepository.GetTotalOutstandingByMemberAsync(member.Id, cancellationToken);
 
         return new MemberDto
         {
@@ -133,7 +133,7 @@ public class MemberService : IMemberService
             MemberTypeName = member.MemberType?.Name ?? string.Empty,
             JoinDate = member.JoinDate,
             ExpiryDate = member.ExpiryDate,
-            IsActive = member.IsActive,
+            IsActive = !member.IsBlocked,
             User = member.User != null ? new UserDto
             {
                 Id = member.User.Id,
@@ -168,7 +168,8 @@ public class MemberService : IMemberService
         if (existingMember != null)
             throw new InvalidOperationException("User already has a membership");
 
-        var isUnique = await _memberRepository.IsMembershipNumberUniqueAsync(request.MembershipNumber, cancellationToken);
+        var membershipNumber = $"MEM-{DateTime.UtcNow:yyyyMMdd}-{Guid.NewGuid().ToString("N")[..6].ToUpperInvariant()}";
+        var isUnique = await _memberRepository.IsMemberNumberUniqueAsync(membershipNumber, null, cancellationToken);
         if (!isUnique)
             throw new InvalidOperationException("Membership number already exists");
 
@@ -176,11 +177,11 @@ public class MemberService : IMemberService
         {
             Id = Guid.NewGuid(),
             UserId = request.UserId,
-            MembershipNumber = request.MembershipNumber,
+            MembershipNumber = membershipNumber,
             MemberTypeId = request.MemberTypeId,
-            JoinDate = request.JoinDate,
-            ExpiryDate = request.ExpiryDate,
-            IsActive = true,
+            JoinDate = DateTime.UtcNow,
+            ExpiryDate = request.ExpiryDate ?? DateTime.UtcNow.AddYears(1),
+            Address = request.Address,
             CreatedAt = DateTime.UtcNow
         };
 
@@ -207,7 +208,7 @@ public class MemberService : IMemberService
             member.ExpiryDate = request.ExpiryDate.Value;
 
         if (request.IsActive.HasValue)
-            member.IsActive = request.IsActive.Value;
+            member.IsBlocked = !request.IsActive.Value;
 
         member.UpdatedAt = DateTime.UtcNow;
         await _memberRepository.UpdateAsync(member, cancellationToken);
@@ -233,7 +234,7 @@ public class MemberService : IMemberService
         if (member == null)
             return false;
 
-        member.IsActive = !member.IsActive;
+        member.IsBlocked = !member.IsBlocked;
         member.UpdatedAt = DateTime.UtcNow;
         await _memberRepository.UpdateAsync(member, cancellationToken);
         return true;
@@ -247,12 +248,11 @@ public class MemberService : IMemberService
         {
             Id = mt.Id,
             Name = mt.Name,
-            Description = mt.Description,
             MaxBooksAllowed = mt.MaxBooksAllowed,
-            LoanDurationDays = mt.LoanDurationDays,
-            CanReserve = mt.CanReserve,
-            MaxReservationsAllowed = mt.MaxReservationsAllowed,
-            FineRatePerDay = mt.FineRatePerDay,
+            LoanDurationDays = mt.LoanDays,
+            MaxRenewalsAllowed = mt.MaxRenewals,
+            ReservationExpiryHours = mt.ReservationExpiryHours,
+            FinePerDay = mt.FinePerDay,
             CreatedAt = mt.CreatedAt
         }).ToList();
 
@@ -275,12 +275,11 @@ public class MemberService : IMemberService
         {
             Id = memberType.Id,
             Name = memberType.Name,
-            Description = memberType.Description,
             MaxBooksAllowed = memberType.MaxBooksAllowed,
-            LoanDurationDays = memberType.LoanDurationDays,
-            CanReserve = memberType.CanReserve,
-            MaxReservationsAllowed = memberType.MaxReservationsAllowed,
-            FineRatePerDay = memberType.FineRatePerDay,
+            LoanDurationDays = memberType.LoanDays,
+            MaxRenewalsAllowed = memberType.MaxRenewals,
+            ReservationExpiryHours = memberType.ReservationExpiryHours,
+            FinePerDay = memberType.FinePerDay,
             CreatedAt = memberType.CreatedAt
         };
     }
@@ -291,12 +290,11 @@ public class MemberService : IMemberService
         {
             Id = Guid.NewGuid(),
             Name = request.Name,
-            Description = request.Description,
             MaxBooksAllowed = request.MaxBooksAllowed,
-            LoanDurationDays = request.LoanDurationDays,
-            CanReserve = request.CanReserve,
-            MaxReservationsAllowed = request.MaxReservationsAllowed,
-            FineRatePerDay = request.FineRatePerDay,
+            LoanDays = request.LoanDurationDays,
+            MaxRenewals = request.MaxRenewalsAllowed,
+            FinePerDay = request.FinePerDay,
+            ReservationExpiryHours = request.ReservationExpiryHours,
             CreatedAt = DateTime.UtcNow
         };
 
@@ -306,12 +304,11 @@ public class MemberService : IMemberService
         {
             Id = memberType.Id,
             Name = memberType.Name,
-            Description = memberType.Description,
             MaxBooksAllowed = memberType.MaxBooksAllowed,
-            LoanDurationDays = memberType.LoanDurationDays,
-            CanReserve = memberType.CanReserve,
-            MaxReservationsAllowed = memberType.MaxReservationsAllowed,
-            FineRatePerDay = memberType.FineRatePerDay,
+            LoanDurationDays = memberType.LoanDays,
+            MaxRenewalsAllowed = memberType.MaxRenewals,
+            ReservationExpiryHours = memberType.ReservationExpiryHours,
+            FinePerDay = memberType.FinePerDay,
             CreatedAt = memberType.CreatedAt
         };
     }
@@ -322,13 +319,12 @@ public class MemberService : IMemberService
         if (memberType == null)
             return null;
 
-        memberType.Name = request.Name;
-        memberType.Description = request.Description;
-        memberType.MaxBooksAllowed = request.MaxBooksAllowed;
-        memberType.LoanDurationDays = request.LoanDurationDays;
-        memberType.CanReserve = request.CanReserve;
-        memberType.MaxReservationsAllowed = request.MaxReservationsAllowed;
-        memberType.FineRatePerDay = request.FineRatePerDay;
+        memberType.Name = request.Name ?? memberType.Name;
+        memberType.MaxBooksAllowed = request.MaxBooksAllowed ?? memberType.MaxBooksAllowed;
+        memberType.LoanDays = request.LoanDurationDays ?? memberType.LoanDays;
+        memberType.MaxRenewals = request.MaxRenewalsAllowed ?? memberType.MaxRenewals;
+        memberType.FinePerDay = request.FinePerDay ?? memberType.FinePerDay;
+        memberType.ReservationExpiryHours = request.ReservationExpiryHours ?? memberType.ReservationExpiryHours;
         memberType.UpdatedAt = DateTime.UtcNow;
 
         await _memberTypeRepository.UpdateAsync(memberType, cancellationToken);
@@ -337,12 +333,11 @@ public class MemberService : IMemberService
         {
             Id = memberType.Id,
             Name = memberType.Name,
-            Description = memberType.Description,
             MaxBooksAllowed = memberType.MaxBooksAllowed,
-            LoanDurationDays = memberType.LoanDurationDays,
-            CanReserve = memberType.CanReserve,
-            MaxReservationsAllowed = memberType.MaxReservationsAllowed,
-            FineRatePerDay = memberType.FineRatePerDay,
+            LoanDurationDays = memberType.LoanDays,
+            MaxRenewalsAllowed = memberType.MaxRenewals,
+            ReservationExpiryHours = memberType.ReservationExpiryHours,
+            FinePerDay = memberType.FinePerDay,
             CreatedAt = memberType.CreatedAt
         };
     }

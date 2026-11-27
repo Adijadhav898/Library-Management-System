@@ -57,7 +57,6 @@ public class UpdateMemberRequest
 public class MemberTypeDto : BaseDto
 {
     public string Name { get; set; } = string.Empty;
-    public string? Description { get; set; }
     public int MaxBooksAllowed { get; set; }
     public int LoanDurationDays { get; set; }
     public int MaxRenewalsAllowed { get; set; }
@@ -68,7 +67,6 @@ public class MemberTypeDto : BaseDto
 public class CreateMemberTypeRequest
 {
     public string Name { get; set; } = string.Empty;
-    public string? Description { get; set; }
     public int MaxBooksAllowed { get; set; }
     public int LoanDurationDays { get; set; }
     public int MaxRenewalsAllowed { get; set; }
@@ -79,7 +77,6 @@ public class CreateMemberTypeRequest
 public class UpdateMemberTypeRequest
 {
     public string? Name { get; set; }
-    public string? Description { get; set; }
     public int? MaxBooksAllowed { get; set; }
     public int? LoanDurationDays { get; set; }
     public int? MaxRenewalsAllowed { get; set; }
