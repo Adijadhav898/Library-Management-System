@@ -27,8 +27,7 @@ public class MemberProfile : Profile
             .ForMember(dest => dest.ReservationExpiryHours, opt => opt.MapFrom(src => 48)) // Default value since MemberType doesn't have this
             .ForMember(dest => dest.FullName, opt => opt.MapFrom(src => src.User != null ? src.User.FullName : string.Empty))
             .ForMember(dest => dest.ActiveLoansCount, opt => opt.MapFrom(src => src.Loans != null ? src.Loans.Count(l => l.Status == LMS.Domain.Enums.LoanStatus.Active) : 0))
-            .ForMember(dest => dest.TotalOutstandingFines, opt => opt.MapFrom(src => src.Fines != null ? src.Fines.Where(f => f.Status == LMS.Domain.Enums.FineStatus.Unpaid || f.Status == LMS.Domain.Enums.FineStatus.PartiallyPaid).Sum(f => f.OutstandingAmount) : 0));
-
+            .ForMember(dest => dest.TotalOutstandingFines, opt => opt.MapFrom(src => src.Fines != null ? src.Fines.Where(f => f.Status == LMS.Domain.Enums.FineStatus.Unpaid || f.Status == LMS.Domain.Enums.FineStatus.PartiallyPaid).Sum(f => f.Amount - f.PaidAmount) : 0));
         CreateMap<CreateMemberRequest, Member>()
             .ForMember(dest => dest.User, opt => opt.Ignore())
             .ForMember(dest => dest.MembershipNumber, opt => opt.Ignore())

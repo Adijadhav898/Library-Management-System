@@ -32,9 +32,8 @@ public class CatalogProfile : Profile
             .ForMember(dest => dest.CategoryName, opt => opt.MapFrom(src => src.Category != null ? src.Category.Name : string.Empty))
             .ForMember(dest => dest.PublisherName, opt => opt.MapFrom(src => src.Publisher != null ? src.Publisher.Name : string.Empty))
             .ForMember(dest => dest.Authors, opt => opt.MapFrom(src => src.BookAuthors.Select(ba => ba.Author)))
-            .ForMember(dest => dest.AvailableCopies, opt => opt.MapFrom(src => src.Copies.Count(c => c.Status == Domain.Enums.CopyStatus.Available)))
-            .ForMember(dest => dest.TotalCopies, opt => opt.MapFrom(src => src.Copies.Count));
-
+            .ForMember(dest => dest.AvailableCopies, opt => opt.MapFrom(src => src.BookCopies.Count(c => c.Status == Domain.Enums.CopyStatus.Available)))
+            .ForMember(dest => dest.TotalCopies, opt => opt.MapFrom(src => src.BookCopies.Count));
         CreateMap<CreateBookRequest, Book>()
             .ForMember(dest => dest.BookAuthors, opt => opt.Ignore());
 

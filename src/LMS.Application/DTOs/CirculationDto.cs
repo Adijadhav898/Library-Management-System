@@ -96,7 +96,7 @@ public class FineDto : BaseDto
 public class CreateFineRequest
 {
     public Guid MemberId { get; set; }
-    public Guid? LoanId { get; set; }
+    public Guid LoanId { get; set; }
     public FineType FineType { get; set; }
     public decimal Amount { get; set; }
     public string Description { get; set; } = string.Empty;
