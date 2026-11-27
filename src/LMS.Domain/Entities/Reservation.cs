@@ -12,4 +12,5 @@ public class Reservation : BaseEntity
     public DateTime? NotifiedAt { get; set; }
     public DateTime ExpiresAt { get; set; }
     public ReservationStatus Status { get; set; } = ReservationStatus.Pending;
+    public string? Notes { get; set; }
 }

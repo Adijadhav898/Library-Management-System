@@ -13,6 +13,7 @@ public class PaymentConfiguration : IEntityTypeConfiguration<Payment>
 
         builder.Property(p => p.Amount).HasColumnType("decimal(18,2)");
         builder.Property(p => p.TransactionRef).HasMaxLength(100);
+        builder.Property(p => p.Notes).HasMaxLength(500);
 
         builder.HasIndex(p => p.FineId);
         builder.HasIndex(p => p.PaidAt);

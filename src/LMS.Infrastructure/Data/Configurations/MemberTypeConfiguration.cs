@@ -16,6 +16,7 @@ public class MemberTypeConfiguration : IEntityTypeConfiguration<MemberType>
         builder.Property(mt => mt.LoanDays).HasDefaultValue(14);
         builder.Property(mt => mt.MaxRenewals).HasDefaultValue(2);
         builder.Property(mt => mt.FinePerDay).HasDefaultValue(1.0m).HasColumnType("decimal(18,2)");
+        builder.Property(mt => mt.ReservationExpiryHours).HasDefaultValue(48);
 
         builder.HasIndex(mt => mt.Name).IsUnique();
     }

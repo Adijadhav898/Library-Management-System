@@ -13,6 +13,7 @@ public class LoanConfiguration : IEntityTypeConfiguration<Loan>
 
         builder.Property(l => l.DueDate).IsRequired();
         builder.Property(l => l.RenewalCount).HasDefaultValue(0);
+        builder.Property(l => l.Notes).HasMaxLength(500);
 
         builder.HasIndex(l => l.BookCopyId);
         builder.HasIndex(l => l.MemberId);
