@@ -13,7 +13,7 @@ public class PublisherConfiguration : IEntityTypeConfiguration<Publisher>
 
         builder.Property(p => p.Name).IsRequired().HasMaxLength(200);
         builder.Property(p => p.Address).HasMaxLength(500);
-        builder.Property(p => p.PhoneNumber).HasMaxLength(20);
+        builder.Property(p => p.Phone).HasMaxLength(20);
         builder.Property(p => p.Email).HasMaxLength(256);
 
         builder.HasIndex(p => p.Name).IsUnique();

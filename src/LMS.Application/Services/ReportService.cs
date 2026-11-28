@@ -85,7 +85,7 @@ public class ReportService : IReportService
     {
         var memberActivities = await _memberRepository.GetMemberActivityAsync(request, cancellationToken);
 
-        return memberActivities.Select(ma => new MemberActivityDto
+        return memberActivities.Items.Select(ma => new MemberActivityDto
         {
             MemberId = ma.MemberId,
             MemberName = ma.MemberName,

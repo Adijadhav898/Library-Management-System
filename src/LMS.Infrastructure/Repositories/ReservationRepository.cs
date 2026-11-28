@@ -15,8 +15,8 @@ public class ReservationRepository : GenericRepository<Reservation>, IReservatio
     {
         var query = _dbSet
             .Include(r => r.Book)
-            .Include(r => r.Member)
-            .Include(r => r.FulfilledByBookCopy).ThenInclude(bc => bc!.Book)
+            .Include(r => r.Member).ThenInclude(m => m.User)
+            .Include(r => r.BookCopy)
             .AsNoTracking();
 
         if (memberId.HasValue)
@@ -45,18 +45,19 @@ public class ReservationRepository : GenericRepository<Reservation>, IReservatio
         };
     }
 
+    // "Active" reservation = still waiting (Pending) or book is held for the member (Ready)
     public async Task<IEnumerable<Reservation>> GetActiveByMemberAsync(Guid memberId, CancellationToken cancellationToken = default)
     {
         return await _dbSet
             .Include(r => r.Book)
-            .Where(r => r.MemberId == memberId && r.Status == ReservationStatus.Active)
+            .Where(r => r.MemberId == memberId && (r.Status == ReservationStatus.Pending || r.Status == ReservationStatus.Ready))
             .ToListAsync(cancellationToken);
     }
 
     public async Task<IEnumerable<Reservation>> GetActiveByBookAsync(Guid bookId, CancellationToken cancellationToken = default)
     {
         return await _dbSet
-            .Where(r => r.BookId == bookId && r.Status == ReservationStatus.Active)
+            .Where(r => r.BookId == bookId && (r.Status == ReservationStatus.Pending || r.Status == ReservationStatus.Ready))
             .OrderBy(r => r.ReservedAt)
             .ToListAsync(cancellationToken);
     }
@@ -64,16 +65,22 @@ public class ReservationRepository : GenericRepository<Reservation>, IReservatio
     public async Task<Reservation?> GetNextInQueueAsync(Guid bookId, CancellationToken cancellationToken = default)
     {
         return await _dbSet
-            .Include(r => r.Member)
-            .Where(r => r.BookId == bookId && r.Status == ReservationStatus.Active)
+            .Include(r => r.Member).ThenInclude(m => m.User)
+            .Where(r => r.BookId == bookId && r.Status == ReservationStatus.Pending)
             .OrderBy(r => r.ReservedAt)
             .FirstOrDefaultAsync(cancellationToken);
     }
 
     public async Task<IEnumerable<Reservation>> GetExpiredReservationsAsync(CancellationToken cancellationToken = default)
     {
+        var now = DateTime.UtcNow;
         return await _dbSet
-            .Where(r => r.Status == ReservationStatus.Active && r.ExpiresAt < DateTime.UtcNow)
+            .Where(r => (r.Status == ReservationStatus.Pending || r.Status == ReservationStatus.Ready) && r.ExpiresAt < now)
             .ToListAsync(cancellationToken);
+    }
+
+    public async Task<int> GetPendingReservationsCountAsync(CancellationToken cancellationToken = default)
+    {
+        return await _dbSet.CountAsync(r => r.Status == ReservationStatus.Pending, cancellationToken);
     }
 }

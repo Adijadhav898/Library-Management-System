@@ -1,352 +1,143 @@
-using LMS.Application.DTOs.Circulation;
+using LMS.Application.DTOs;
 using LMS.Application.Interfaces;
+using LMS.Domain.Enums;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace LMS.API.Controllers;
 
-[ApiController]
-[Route("api/[controller]")]
+/// <summary>Loans, reservations, fines and payments. Staff only.</summary>
 [Authorize(Policy = "LibrarianOrAdmin")]
-[Produces("application/json")]
-public class CirculationController : ControllerBase
+public class CirculationController : ApiControllerBase
 {
-    private readonly ICirculationService _circulationService;
-    private readonly ILogger<CirculationController> _logger;
+    private readonly ICirculationService _circulation;
 
-    public CirculationController(ICirculationService circulationService, ILogger<CirculationController> logger)
+    public CirculationController(ICirculationService circulation)
     {
-        _circulationService = circulationService;
-        _logger = logger;
+        _circulation = circulation;
     }
 
-    #region Loans
+    // ---------- Loans ----------
 
-    /// <summary>
-    /// Get all loans with pagination and filters
-    /// </summary>
     [HttpGet("loans")]
-    [ProducesResponseType(typeof(PagedResultDto<LoanDto>), StatusCodes.Status200OK)]
-    public async Task<ActionResult<PagedResultDto<LoanDto>>> GetLoans(
-        [FromQuery] int page = 1,
-        [FromQuery] int pageSize = 10,
-        [FromQuery] string? search = null,
-        [FromQuery] Guid? memberId = null,
-        [FromQuery] Guid? bookCopyId = null,
-        [FromQuery] string? status = null,
-        [FromQuery] bool? isOverdue = null)
-    {
-        var result = await _circulationService.GetLoansAsync(page, pageSize, search, memberId, bookCopyId, status, isOverdue);
-        return Ok(result);
-    }
+    public async Task<ActionResult<PaginatedResult<LoanDto>>> GetLoans([FromQuery] CirculationPaginationRequest request, CancellationToken ct)
+        => Ok(await _circulation.GetLoansAsync(request, request.MemberId, request.BookCopyId, request.Status, request.IsOverdue, ct));
 
-    /// <summary>
-    /// Get loan by ID
-    /// </summary>
-    [HttpGet("loans/{id:guid}")]
-    [ProducesResponseType(typeof(LoanDto), StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<ActionResult<LoanDto>> GetLoan(Guid id)
-    {
-        var loan = await _circulationService.GetLoanByIdAsync(id);
-        if (loan == null)
-        {
-            return NotFound(new { message = "Loan not found" });
-        }
-        return Ok(loan);
-    }
-
-    /// <summary>
-    /// Issue a new loan
-    /// </summary>
-    [HttpPost("loans")]
-    [ProducesResponseType(typeof(LoanDto), StatusCodes.Status201Created)]
-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    public async Task<ActionResult<LoanDto>> IssueLoan([FromBody] IssueLoanRequestDto request)
-    {
-        try
-        {
-            var loan = await _circulationService.IssueLoanAsync(request);
-            return CreatedAtAction(nameof(GetLoan), new { id = loan.Id }, loan);
-        }
-        catch (InvalidOperationException ex)
-        {
-            return BadRequest(new { message = ex.Message });
-        }
-    }
-
-    /// <summary>
-    /// Return a loan
-    /// </summary>
-    [HttpPost("loans/{id:guid}/return")]
-    [ProducesResponseType(typeof(LoanDto), StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<ActionResult<LoanDto>> ReturnLoan(Guid id, [FromBody] ReturnLoanRequestDto request)
-    {
-        try
-        {
-            var loan = await _circulationService.ReturnLoanAsync(id, request);
-            if (loan == null)
-            {
-                return NotFound(new { message = "Loan not found" });
-            }
-            return Ok(loan);
-        }
-        catch (InvalidOperationException ex)
-        {
-            return BadRequest(new { message = ex.Message });
-        }
-    }
-
-    /// <summary>
-    /// Renew a loan
-    /// </summary>
-    [HttpPost("loans/{id:guid}/renew")]
-    [ProducesResponseType(typeof(LoanDto), StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<ActionResult<LoanDto>> RenewLoan(Guid id, [FromBody] RenewLoanRequestDto request)
-    {
-        try
-        {
-            var loan = await _circulationService.RenewLoanAsync(id, request);
-            if (loan == null)
-            {
-                return NotFound(new { message = "Loan not found" });
-            }
-            return Ok(loan);
-        }
-        catch (InvalidOperationException ex)
-        {
-            return BadRequest(new { message = ex.Message });
-        }
-    }
-
-    /// <summary>
-    /// Get overdue loans
-    /// </summary>
     [HttpGet("loans/overdue")]
-    [ProducesResponseType(typeof(IEnumerable<LoanDto>), StatusCodes.Status200OK)]
-    public async Task<ActionResult<IEnumerable<LoanDto>>> GetOverdueLoans()
+    public async Task<ActionResult<IEnumerable<LoanDto>>> GetOverdueLoans(CancellationToken ct)
+        => Ok(await _circulation.GetOverdueLoansAsync(ct));
+
+    [HttpGet("loans/{id:guid}")]
+    public async Task<ActionResult<LoanDto>> GetLoanById(Guid id, CancellationToken ct)
     {
-        var loans = await _circulationService.GetOverdueLoansAsync();
-        return Ok(loans);
+        var loan = await _circulation.GetLoanByIdAsync(id, ct);
+        return loan == null ? NotFound() : Ok(loan);
     }
 
-    /// <summary>
-    /// Process overdue fines (background job trigger)
-    /// </summary>
-    [HttpPost("loans/process-overdue-fines")]
+    [HttpPost("loans/issue")]
+    public async Task<ActionResult<LoanDto>> IssueBook([FromBody] CreateLoanRequest request, CancellationToken ct)
+    {
+        if (CurrentUserId is not Guid userId) return Unauthorized();
+        var loan = await _circulation.IssueBookAsync(request, userId, ct);
+        return CreatedAtAction(nameof(GetLoanById), new { id = loan.Id }, loan);
+    }
+
+    [HttpPost("loans/renew")]
+    public async Task<ActionResult<LoanDto>> RenewLoan([FromBody] RenewLoanRequest request, CancellationToken ct)
+    {
+        if (CurrentUserId is not Guid userId) return Unauthorized();
+        var loan = await _circulation.RenewLoanAsync(request, userId, ct);
+        return loan == null ? NotFound() : Ok(loan);
+    }
+
+    [HttpPost("loans/return")]
+    public async Task<ActionResult<LoanDto>> ReturnBook([FromBody] ReturnLoanRequest request, CancellationToken ct)
+    {
+        if (CurrentUserId is not Guid userId) return Unauthorized();
+        var loan = await _circulation.ReturnBookAsync(request, userId, ct);
+        return loan == null ? NotFound() : Ok(loan);
+    }
+
+    [HttpPost("loans/process-overdue")]
     [Authorize(Policy = "AdminOnly")]
-    [ProducesResponseType(StatusCodes.Status200OK)]
-    public async Task<IActionResult> ProcessOverdueFines()
+    public async Task<IActionResult> ProcessOverdueLoans(CancellationToken ct)
     {
-        await _circulationService.ProcessOverdueFinesAsync();
-        return Ok(new { message = "Overdue fines processed successfully" });
+        await _circulation.ProcessOverdueLoansAsync(ct);
+        return Ok(new { message = "Overdue loans processed" });
     }
 
-    /// <summary>
-    /// Process expired reservations (background job trigger)
-    /// </summary>
-    [HttpPost("loans/process-expired-reservations")]
-    [Authorize(Policy = "AdminOnly")]
-    [ProducesResponseType(StatusCodes.Status200OK)]
-    public async Task<IActionResult> ProcessExpiredReservations()
-    {
-        await _circulationService.ProcessExpiredReservationsAsync();
-        return Ok(new { message = "Expired reservations processed successfully" });
-    }
+    // ---------- Reservations ----------
 
-    #endregion
-
-    #region Reservations
-
-    /// <summary>
-    /// Get all reservations with pagination and filters
-    /// </summary>
     [HttpGet("reservations")]
-    [ProducesResponseType(typeof(PagedResultDto<ReservationDto>), StatusCodes.Status200OK)]
-    public async Task<ActionResult<PagedResultDto<ReservationDto>>> GetReservations(
-        [FromQuery] int page = 1,
-        [FromQuery] int pageSize = 10,
-        [FromQuery] string? search = null,
-        [FromQuery] Guid? memberId = null,
-        [FromQuery] Guid? bookId = null,
-        [FromQuery] string? status = null)
-    {
-        var result = await _circulationService.GetReservationsAsync(page, pageSize, search, memberId, bookId, status);
-        return Ok(result);
-    }
+    public async Task<ActionResult<PaginatedResult<ReservationDto>>> GetReservations([FromQuery] PaginationRequest request, [FromQuery] Guid? memberId, [FromQuery] Guid? bookId, [FromQuery] ReservationStatus? status, CancellationToken ct)
+        => Ok(await _circulation.GetReservationsAsync(request, memberId, bookId, status, ct));
 
-    /// <summary>
-    /// Get reservation by ID
-    /// </summary>
     [HttpGet("reservations/{id:guid}")]
-    [ProducesResponseType(typeof(ReservationDto), StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<ActionResult<ReservationDto>> GetReservation(Guid id)
+    public async Task<ActionResult<ReservationDto>> GetReservationById(Guid id, CancellationToken ct)
     {
-        var reservation = await _circulationService.GetReservationByIdAsync(id);
-        if (reservation == null)
-        {
-            return NotFound(new { message = "Reservation not found" });
-        }
-        return Ok(reservation);
+        var r = await _circulation.GetReservationByIdAsync(id, ct);
+        return r == null ? NotFound() : Ok(r);
     }
 
-    /// <summary>
-    /// Create a new reservation
-    /// </summary>
     [HttpPost("reservations")]
-    [ProducesResponseType(typeof(ReservationDto), StatusCodes.Status201Created)]
-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    public async Task<ActionResult<ReservationDto>> CreateReservation([FromBody] CreateReservationRequestDto request)
+    public async Task<ActionResult<ReservationDto>> CreateReservation([FromBody] CreateReservationRequest request, CancellationToken ct)
     {
-        try
-        {
-            var reservation = await _circulationService.CreateReservationAsync(request);
-            return CreatedAtAction(nameof(GetReservation), new { id = reservation.Id }, reservation);
-        }
-        catch (InvalidOperationException ex)
-        {
-            return BadRequest(new { message = ex.Message });
-        }
+        var r = await _circulation.CreateReservationAsync(request, ct);
+        return CreatedAtAction(nameof(GetReservationById), new { id = r.Id }, r);
     }
 
-    /// <summary>
-    /// Cancel a reservation
-    /// </summary>
-    [HttpPost("reservations/{id:guid}/cancel")]
-    [ProducesResponseType(typeof(ReservationDto), StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<ActionResult<ReservationDto>> CancelReservation(Guid id)
-    {
-        var reservation = await _circulationService.CancelReservationAsync(id);
-        if (reservation == null)
-        {
-            return NotFound(new { message = "Reservation not found" });
-        }
-        return Ok(reservation);
-    }
+    [HttpPost("reservations/cancel")]
+    public async Task<IActionResult> CancelReservation([FromBody] CancelReservationRequest request, CancellationToken ct)
+        => await _circulation.CancelReservationAsync(request, ct) ? Ok() : NotFound();
 
-    /// <summary>
-    /// Fulfill a reservation (when book becomes available)
-    /// </summary>
-    [HttpPost("reservations/{id:guid}/fulfill")]
-    [ProducesResponseType(typeof(ReservationDto), StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<ActionResult<ReservationDto>> FulfillReservation(Guid id)
-    {
-        var reservation = await _circulationService.FulfillReservationAsync(id);
-        if (reservation == null)
-        {
-            return NotFound(new { message = "Reservation not found" });
-        }
-        return Ok(reservation);
-    }
-
-    #endregion
-
-    #region Fines
-
-    /// <summary>
-    /// Get all fines with pagination and filters
-    /// </summary>
-    [HttpGet("fines")]
-    [ProducesResponseType(typeof(PagedResultDto<FineDto>), StatusCodes.Status200OK)]
-    public async Task<ActionResult<PagedResultDto<FineDto>>> GetFines(
-        [FromQuery] int page = 1,
-        [FromQuery] int pageSize = 10,
-        [FromQuery] Guid? memberId = null,
-        [FromQuery] string? status = null)
-    {
-        var result = await _circulationService.GetFinesAsync(page, pageSize, memberId, status);
-        return Ok(result);
-    }
-
-    /// <summary>
-    /// Get fine by ID
-    /// </summary>
-    [HttpGet("fines/{id:guid}")]
-    [ProducesResponseType(typeof(FineDto), StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<ActionResult<FineDto>> GetFine(Guid id)
-    {
-        var fine = await _circulationService.GetFineByIdAsync(id);
-        if (fine == null)
-        {
-            return NotFound(new { message = "Fine not found" });
-        }
-        return Ok(fine);
-    }
-
-    /// <summary>
-    /// Pay a fine
-    /// </summary>
-    [HttpPost("fines/{id:guid}/pay")]
-    [ProducesResponseType(typeof(FineDto), StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<ActionResult<FineDto>> PayFine(Guid id, [FromBody] PayFineRequestDto request)
-    {
-        try
-        {
-            var fine = await _circulationService.PayFineAsync(id, request);
-            if (fine == null)
-            {
-                return NotFound(new { message = "Fine not found" });
-            }
-            return Ok(fine);
-        }
-        catch (InvalidOperationException ex)
-        {
-            return BadRequest(new { message = ex.Message });
-        }
-    }
-
-    /// <summary>
-    /// Waive a fine (Admin only)
-    /// </summary>
-    [HttpPost("fines/{id:guid}/waive")]
+    [HttpPost("reservations/process-expired")]
     [Authorize(Policy = "AdminOnly")]
-    [ProducesResponseType(typeof(FineDto), StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<ActionResult<FineDto>> WaiveFine(Guid id, [FromBody] WaiveFineRequestDto request)
+    public async Task<IActionResult> ProcessExpiredReservations(CancellationToken ct)
     {
-        try
-        {
-            var fine = await _circulationService.WaiveFineAsync(id, request);
-            if (fine == null)
-            {
-                return NotFound(new { message = "Fine not found" });
-            }
-            return Ok(fine);
-        }
-        catch (InvalidOperationException ex)
-        {
-            return BadRequest(new { message = ex.Message });
-        }
+        await _circulation.ProcessExpiredReservationsAsync(ct);
+        return Ok(new { message = "Expired reservations processed" });
     }
 
-    /// <summary>
-    /// Get member fines summary
-    /// </summary>
-    [HttpGet("fines/member/{memberId:guid}/summary")]
-    [ProducesResponseType(typeof(MemberFinesSummaryDto), StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<ActionResult<MemberFinesSummaryDto>> GetMemberFinesSummary(Guid memberId)
+    // ---------- Fines ----------
+
+    [HttpGet("fines")]
+    public async Task<ActionResult<PaginatedResult<FineDto>>> GetFines([FromQuery] FinePaginationRequest request, CancellationToken ct)
+        => Ok(await _circulation.GetFinesAsync(request, request.MemberId, request.Status, ct));
+
+    [HttpGet("fines/{id:guid}")]
+    public async Task<ActionResult<FineDto>> GetFineById(Guid id, CancellationToken ct)
     {
-        var summary = await _circulationService.GetMemberFinesSummaryAsync(memberId);
-        if (summary == null)
-        {
-            return NotFound(new { message = "Member not found" });
-        }
-        return Ok(summary);
+        var fine = await _circulation.GetFineByIdAsync(id, ct);
+        return fine == null ? NotFound() : Ok(fine);
     }
 
-    #endregion
+    [HttpPost("fines")]
+    public async Task<ActionResult<FineDto>> CreateFine([FromBody] CreateFineRequest request, CancellationToken ct)
+    {
+        var fine = await _circulation.CreateFineAsync(request, ct);
+        return CreatedAtAction(nameof(GetFineById), new { id = fine.Id }, fine);
+    }
+
+    /// <summary>Waive or otherwise change fine status (Admin only).</summary>
+    [HttpPatch("fines/{id:guid}/status")]
+    [Authorize(Policy = "AdminOnly")]
+    public async Task<ActionResult<FineDto>> UpdateFineStatus(Guid id, [FromQuery] FineStatus status, CancellationToken ct)
+    {
+        var fine = await _circulation.UpdateFineStatusAsync(id, status, ct);
+        return fine == null ? NotFound() : Ok(fine);
+    }
+
+    // ---------- Payments ----------
+
+    [HttpGet("payments")]
+    public async Task<ActionResult<PaginatedResult<PaymentDto>>> GetPayments([FromQuery] PaginationRequest request, [FromQuery] Guid? fineId, [FromQuery] DateTime? fromDate, [FromQuery] DateTime? toDate, CancellationToken ct)
+        => Ok(await _circulation.GetPaymentsAsync(request, fineId, fromDate, toDate, ct));
+
+    [HttpPost("payments")]
+    public async Task<ActionResult<PaymentDto>> RecordPayment([FromBody] CreatePaymentRequest request, CancellationToken ct)
+    {
+        if (CurrentUserId is not Guid userId) return Unauthorized();
+        var payment = await _circulation.RecordPaymentAsync(request, userId, ct);
+        return Ok(payment);
+    }
 }

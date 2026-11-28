@@ -15,5 +15,8 @@ public class RoleConfiguration : IEntityTypeConfiguration<Role>
         builder.Property(r => r.Description).HasMaxLength(500);
 
         builder.HasIndex(r => r.Name).IsUnique();
+
+        // Users are reached through the UserRole join entity
+        builder.Ignore(r => r.Users);
     }
 }

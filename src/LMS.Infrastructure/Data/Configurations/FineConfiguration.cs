@@ -12,7 +12,9 @@ public class FineConfiguration : IEntityTypeConfiguration<Fine>
         builder.HasKey(f => f.Id);
 
         builder.Property(f => f.Amount).HasColumnType("decimal(18,2)");
-        builder.Property(f => f.Reason).IsRequired().HasMaxLength(200);
+        builder.Property(f => f.FineType).HasConversion<string>().HasMaxLength(20);
+        builder.Property(f => f.PaidAmount).HasColumnType("decimal(18,2)").HasDefaultValue(0m);
+        builder.Property(f => f.Description).HasMaxLength(500);
 
         builder.HasIndex(f => f.LoanId);
         builder.HasIndex(f => f.MemberId);

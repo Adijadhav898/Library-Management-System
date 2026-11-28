@@ -1,191 +1,85 @@
-using System.ComponentModel.DataAnnotations;
-using LMS.Application.DTOs.Auth;
+using LMS.Application.DTOs;
 using LMS.Application.Interfaces;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace LMS.API.Controllers;
 
-[ApiController]
-[Route("api/[controller]")]
-[Produces("application/json")]
-public class AuthController : ControllerBase
+public class AuthController : ApiControllerBase
 {
     private readonly IAuthService _authService;
-    private readonly ILogger<AuthController> _logger;
 
-    public AuthController(IAuthService authService, ILogger<AuthController> logger)
+    public AuthController(IAuthService authService)
     {
         _authService = authService;
-        _logger = logger;
     }
 
-    /// <summary>
-    /// Authenticate a user and return access and refresh tokens
-    /// </summary>
+    /// <summary>Login and get access + refresh tokens.</summary>
     [HttpPost("login")]
     [AllowAnonymous]
-    [ProducesResponseType(typeof(LoginResponseDto), StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
-    public async Task<ActionResult<LoginResponseDto>> Login([FromBody] LoginRequestDto request)
+    public async Task<ActionResult<LoginResponse>> Login([FromBody] LoginRequest request, CancellationToken ct)
     {
-        var result = await _authService.LoginAsync(request);
-        if (result == null)
-        {
-            return Unauthorized(new { message = "Invalid email or password" });
-        }
-        return Ok(result);
+        var result = await _authService.LoginAsync(request, ct);
+        return result == null ? Unauthorized(new { message = "Invalid email or password" }) : Ok(result);
     }
 
-    /// <summary>
-    /// Register a new user (Admin only)
-    /// </summary>
+    /// <summary>Register a new user (Admin only).</summary>
     [HttpPost("register")]
     [Authorize(Policy = "AdminOnly")]
-    [ProducesResponseType(typeof(LoginResponseDto), StatusCodes.Status201Created)]
-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    [ProducesResponseType(StatusCodes.Status409Conflict)]
-    public async Task<ActionResult<LoginResponseDto>> Register([FromBody] RegisterRequestDto request)
+    public async Task<ActionResult<LoginResponse>> Register([FromBody] RegisterRequest request, CancellationToken ct)
     {
-        try
-        {
-            var result = await _authService.RegisterAsync(request);
-            return CreatedAtAction(nameof(GetProfile), new { }, result);
-        }
-        catch (InvalidOperationException ex)
-        {
-            return Conflict(new { message = ex.Message });
-        }
+        var result = await _authService.RegisterAsync(request, ct);
+        return result == null ? BadRequest(new { message = "Registration failed (email may already exist)" }) : StatusCode(StatusCodes.Status201Created, result);
     }
 
-    /// <summary>
-    /// Refresh access token using refresh token
-    /// </summary>
-    [HttpPost("refresh")]
+    [HttpPost("refresh-token")]
     [AllowAnonymous]
-    [ProducesResponseType(typeof(LoginResponseDto), StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
-    public async Task<ActionResult<LoginResponseDto>> RefreshToken([FromBody] RefreshTokenRequestDto request)
+    public async Task<ActionResult<RefreshTokenResponse>> RefreshToken([FromBody] RefreshTokenRequest request, CancellationToken ct)
     {
-        var result = await _authService.RefreshTokenAsync(request);
-        if (result == null)
-        {
-            return Unauthorized(new { message = "Invalid or expired refresh token" });
-        }
-        return Ok(result);
+        var result = await _authService.RefreshTokenAsync(request, ct);
+        return result == null ? Unauthorized(new { message = "Invalid or expired refresh token" }) : Ok(result);
     }
 
-    /// <summary>
-    /// Revoke refresh token (logout)
-    /// </summary>
-    [HttpPost("revoke")]
+    [HttpPost("logout")]
     [Authorize]
-    [ProducesResponseType(StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    public async Task<IActionResult> RevokeToken([FromBody] RevokeTokenRequestDto request)
+    public async Task<IActionResult> Logout([FromBody] RefreshTokenRequest request, CancellationToken ct)
     {
-        var result = await _authService.RevokeTokenAsync(request);
-        if (!result)
-        {
-            return BadRequest(new { message = "Invalid token" });
-        }
-        return Ok(new { message = "Token revoked successfully" });
+        var ok = await _authService.RevokeTokenAsync(request.RefreshToken, ct);
+        return ok ? Ok(new { message = "Logged out" }) : BadRequest(new { message = "Invalid token" });
     }
 
-    /// <summary>
-    /// Change user password
-    /// </summary>
     [HttpPost("change-password")]
     [Authorize]
-    [ProducesResponseType(StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    public async Task<IActionResult> ChangePassword([FromBody] ChangePasswordRequestDto request)
+    public async Task<IActionResult> ChangePassword([FromBody] ChangePasswordRequest request, CancellationToken ct)
     {
-        var userId = GetCurrentUserId();
-        var result = await _authService.ChangePasswordAsync(userId, request);
-        if (!result)
-        {
-            return BadRequest(new { message = "Current password is incorrect" });
-        }
-        return Ok(new { message = "Password changed successfully" });
+        if (CurrentUserId is not Guid userId) return Unauthorized();
+        var ok = await _authService.ChangePasswordAsync(userId, request, ct);
+        return ok ? Ok(new { message = "Password changed" }) : BadRequest(new { message = "Current password is incorrect" });
     }
 
-    /// <summary>
-    /// Request password reset
-    /// </summary>
     [HttpPost("forgot-password")]
     [AllowAnonymous]
-    [ProducesResponseType(StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    public async Task<IActionResult> ForgotPassword([FromBody] ForgotPasswordRequestDto request)
+    public async Task<IActionResult> ForgotPassword([FromBody] ForgotPasswordRequest request, CancellationToken ct)
     {
-        await _authService.ForgotPasswordAsync(request);
-        return Ok(new { message = "If the email exists, a password reset link has been sent" });
+        await _authService.ForgotPasswordAsync(request, ct);
+        // Always same response so we don't reveal which emails exist.
+        return Ok(new { message = "If the email exists, a reset link has been sent" });
     }
 
-    /// <summary>
-    /// Reset password using token
-    /// </summary>
     [HttpPost("reset-password")]
     [AllowAnonymous]
-    [ProducesResponseType(StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    public async Task<IActionResult> ResetPassword([FromBody] ResetPasswordRequestDto request)
+    public async Task<IActionResult> ResetPassword([FromBody] ResetPasswordRequest request, CancellationToken ct)
     {
-        var result = await _authService.ResetPasswordAsync(request);
-        if (!result)
-        {
-            return BadRequest(new { message = "Invalid or expired reset token" });
-        }
-        return Ok(new { message = "Password reset successfully" });
+        var ok = await _authService.ResetPasswordAsync(request, ct);
+        return ok ? Ok(new { message = "Password reset" }) : BadRequest(new { message = "Invalid or expired token" });
     }
 
-    /// <summary>
-    /// Get current user profile
-    /// </summary>
-    [HttpGet("profile")]
+    [HttpGet("me")]
     [Authorize]
-    [ProducesResponseType(typeof(UserProfileDto), StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<ActionResult<UserProfileDto>> GetProfile()
+    public async Task<ActionResult<UserDto>> Me(CancellationToken ct)
     {
-        var userId = GetCurrentUserId();
-        var profile = await _authService.GetProfileAsync(userId);
-        if (profile == null)
-        {
-            return NotFound(new { message = "User not found" });
-        }
-        return Ok(profile);
-    }
-
-    /// <summary>
-    /// Update current user profile
-    /// </summary>
-    [HttpPut("profile")]
-    [Authorize]
-    [ProducesResponseType(typeof(UserProfileDto), StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<ActionResult<UserProfileDto>> UpdateProfile([FromBody] UpdateProfileRequestDto request)
-    {
-        var userId = GetCurrentUserId();
-        var profile = await _authService.UpdateProfileAsync(userId, request);
-        if (profile == null)
-        {
-            return NotFound(new { message = "User not found" });
-        }
-        return Ok(profile);
-    }
-
-    private Guid GetCurrentUserId()
-    {
-        var userIdClaim = User.FindFirst("sub")?.Value ?? User.FindFirst("userId")?.Value;
-        if (string.IsNullOrEmpty(userIdClaim) || !Guid.TryParse(userIdClaim, out var userId))
-        {
-            throw new UnauthorizedAccessException("Invalid user token");
-        }
-        return userId;
+        if (CurrentUserId is not Guid userId) return Unauthorized();
+        var user = await _authService.GetCurrentUserAsync(userId, ct);
+        return user == null ? NotFound() : Ok(user);
     }
 }

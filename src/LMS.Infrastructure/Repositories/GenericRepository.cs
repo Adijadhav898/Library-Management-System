@@ -80,6 +80,12 @@ public class GenericRepository<T> : IGenericRepository<T> where T : BaseEntity
         return entities;
     }
 
+    public virtual Task UpdateAsync(T entity, CancellationToken cancellationToken = default)
+    {
+        _dbSet.Update(entity);
+        return Task.CompletedTask;
+    }
+
     public virtual void Update(T entity)
     {
         _dbSet.Update(entity);

@@ -12,7 +12,7 @@ public class MemberDto : BaseDto
     public string? Address { get; set; }
     public DateTime DateOfBirth { get; set; }
     public DateTime MembershipDate { get; set; }
-    public DateTime JoinDate => MembershipDate;
+    public DateTime JoinDate { get; set; }
     public DateTime? ExpiryDate { get; set; }
     public bool IsActive { get; set; }
     public Guid MemberTypeId { get; set; }
@@ -26,11 +26,12 @@ public class MemberDto : BaseDto
     public int ActiveLoansCount { get; set; }
     public decimal TotalOutstandingFines { get; set; }
     public UserDto? User { get; set; }
-    public decimal UnpaidFines => TotalOutstandingFines;
+    public decimal UnpaidFines { get; set; }
 }
 
 public class CreateMemberRequest
 {
+    public Guid UserId { get; set; }
     public string FirstName { get; set; } = string.Empty;
     public string LastName { get; set; } = string.Empty;
     public string Email { get; set; } = string.Empty;
@@ -56,7 +57,6 @@ public class UpdateMemberRequest
 public class MemberTypeDto : BaseDto
 {
     public string Name { get; set; } = string.Empty;
-    public string? Description { get; set; }
     public int MaxBooksAllowed { get; set; }
     public int LoanDurationDays { get; set; }
     public int MaxRenewalsAllowed { get; set; }
@@ -67,7 +67,6 @@ public class MemberTypeDto : BaseDto
 public class CreateMemberTypeRequest
 {
     public string Name { get; set; } = string.Empty;
-    public string? Description { get; set; }
     public int MaxBooksAllowed { get; set; }
     public int LoanDurationDays { get; set; }
     public int MaxRenewalsAllowed { get; set; }
@@ -78,7 +77,6 @@ public class CreateMemberTypeRequest
 public class UpdateMemberTypeRequest
 {
     public string? Name { get; set; }
-    public string? Description { get; set; }
     public int? MaxBooksAllowed { get; set; }
     public int? LoanDurationDays { get; set; }
     public int? MaxRenewalsAllowed { get; set; }

@@ -14,8 +14,8 @@ public class FineRepository : GenericRepository<Fine>, IFineRepository
     public async Task<PaginatedResult<Fine>> GetPagedAsync(PaginationRequest request, Guid? memberId = null, FineStatus? status = null, CancellationToken cancellationToken = default)
     {
         var query = _dbSet
-            .Include(f => f.Member)
-            .Include(f => f.Loan).ThenInclude(l => l!.BookCopy).ThenInclude(bc => bc!.Book)
+            .Include(f => f.Member).ThenInclude(m => m.User)
+            .Include(f => f.Loan).ThenInclude(l => l.BookCopy).ThenInclude(bc => bc.Book)
             .AsNoTracking();
 
         if (memberId.HasValue)
@@ -41,62 +41,54 @@ public class FineRepository : GenericRepository<Fine>, IFineRepository
         };
     }
 
+    public async Task<IEnumerable<Fine>> GetByLoanAsync(Guid loanId, CancellationToken cancellationToken = default)
+    {
+        return await _dbSet
+            .Where(f => f.LoanId == loanId)
+            .OrderByDescending(f => f.CreatedAt)
+            .ToListAsync(cancellationToken);
+    }
+
     public async Task<IEnumerable<Fine>> GetByMemberAsync(Guid memberId, CancellationToken cancellationToken = default)
     {
         return await _dbSet
-            .Include(f => f.Loan).ThenInclude(l => l!.BookCopy).ThenInclude(bc => bc!.Book)
+            .Include(f => f.Loan).ThenInclude(l => l.BookCopy).ThenInclude(bc => bc.Book)
             .Where(f => f.MemberId == memberId)
             .OrderByDescending(f => f.CreatedAt)
             .ToListAsync(cancellationToken);
     }
 
-    public async Task<IEnumerable<Fine>> GetUnpaidByMemberAsync(Guid memberId, CancellationToken cancellationToken = default)
+    public async Task<IEnumerable<Fine>> GetOutstandingByMemberAsync(Guid memberId, CancellationToken cancellationToken = default)
     {
         return await _dbSet
-            .Include(f => f.Loan).ThenInclude(l => l!.BookCopy).ThenInclude(bc => bc!.Book)
-            .Where(f => f.MemberId == memberId && (f.Status == FineStatus.Pending || f.Status == FineStatus.Partial))
+            .Include(f => f.Loan).ThenInclude(l => l.BookCopy).ThenInclude(bc => bc.Book)
+            .Where(f => f.MemberId == memberId && (f.Status == FineStatus.Unpaid || f.Status == FineStatus.PartiallyPaid))
             .OrderByDescending(f => f.CreatedAt)
             .ToListAsync(cancellationToken);
     }
 
-    public async Task<decimal> GetTotalUnpaidByMemberAsync(Guid memberId, CancellationToken cancellationToken = default)
+    public async Task<decimal> GetTotalOutstandingByMemberAsync(Guid memberId, CancellationToken cancellationToken = default)
     {
         return await _dbSet
-            .Where(f => f.MemberId == memberId && (f.Status == FineStatus.Pending || f.Status == FineStatus.Partial))
-            .SumAsync(f => f.Amount - f.AmountPaid, cancellationToken);
-    }
-
-    public async Task<decimal> GetTotalCollectedAsync(DateTime? from = null, DateTime? to = null, CancellationToken cancellationToken = default)
-    {
-        var query = _dbSet.Where(f => f.Status == FineStatus.Paid);
-
-        if (from.HasValue)
-            query = query.Where(f => f.PaidAt >= from.Value);
-
-        if (to.HasValue)
-            query = query.Where(f => f.PaidAt <= to.Value);
-
-        return await query.SumAsync(f => f.AmountPaid, cancellationToken);
+            .Where(f => f.MemberId == memberId && (f.Status == FineStatus.Unpaid || f.Status == FineStatus.PartiallyPaid))
+            .SumAsync(f => f.Amount - f.PaidAmount, cancellationToken);
     }
 
     public async Task<decimal> GetTotalOutstandingAsync(CancellationToken cancellationToken = default)
     {
         return await _dbSet
-            .Where(f => f.Status == FineStatus.Pending || f.Status == FineStatus.Partial)
-            .SumAsync(f => f.Amount - f.AmountPaid, cancellationToken);
+            .Where(f => f.Status == FineStatus.Unpaid || f.Status == FineStatus.PartiallyPaid)
+            .SumAsync(f => f.Amount - f.PaidAmount, cancellationToken);
     }
 
     public async Task<PaginatedResult<FineReportInfo>> GetFineReportAsync(PaginationRequest request, CancellationToken cancellationToken = default)
     {
-        var query = _dbSet
-            .Include(f => f.Member).ThenInclude(m => m.User)
-            .Include(f => f.Loan).ThenInclude(l => l.BookCopy).ThenInclude(bc => bc.Book)
-            .AsNoTracking();
+        var query = _dbSet.AsNoTracking();
 
         var totalCount = await query.CountAsync(cancellationToken);
 
         var items = await query
-            .OrderByDescending(f => f.IncurredDate)
+            .OrderByDescending(f => f.CreatedAt)
             .Skip((request.PageNumber - 1) * request.PageSize)
             .Take(request.PageSize)
             .Select(f => new FineReportInfo
@@ -106,11 +98,11 @@ public class FineRepository : GenericRepository<Fine>, IFineRepository
                 MemberNumber = f.Member.MembershipNumber,
                 BookTitle = f.Loan.BookCopy.Book.Title,
                 Amount = f.Amount,
-                PaidAmount = f.AmountPaid,
-                OutstandingAmount = f.Amount - f.AmountPaid,
+                PaidAmount = f.PaidAmount,
+                OutstandingAmount = f.Amount - f.PaidAmount,
                 Status = f.Status,
-                IncurredDate = f.IncurredDate,
-                PaidDate = f.PaidAt
+                IncurredDate = f.CreatedAt,
+                PaidDate = f.Payments.Max(p => (DateTime?)p.PaidAt)
             })
             .ToListAsync(cancellationToken);
 

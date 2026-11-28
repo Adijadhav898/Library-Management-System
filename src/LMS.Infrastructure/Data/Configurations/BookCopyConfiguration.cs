@@ -13,8 +13,7 @@ public class BookCopyConfiguration : IEntityTypeConfiguration<BookCopy>
 
         builder.Property(bc => bc.Barcode).IsRequired().HasMaxLength(50);
         builder.Property(bc => bc.Condition).HasMaxLength(200);
-        builder.Property(bc => bc.Price).HasColumnType("decimal(18,2)");
-
+        builder.Property(bc => bc.Cost).HasColumnType("decimal(18,2)");
         builder.HasIndex(bc => bc.Barcode).IsUnique();
         builder.HasIndex(bc => bc.BookId);
         builder.HasIndex(bc => bc.Status);

@@ -6,6 +6,7 @@ namespace LMS.Application.Interfaces;
 public interface IMemberRepository : IGenericRepository<Member>
 {
     Task<Member?> GetByMemberNumberAsync(string memberNumber, CancellationToken cancellationToken = default);
+    Task<Member?> GetByUserIdAsync(Guid userId, CancellationToken cancellationToken = default);
     Task<Member?> GetByEmailAsync(string email, CancellationToken cancellationToken = default);
     Task<bool> IsMemberNumberUniqueAsync(string memberNumber, Guid? excludeId = null, CancellationToken cancellationToken = default);
     Task<bool> IsEmailUniqueAsync(string email, Guid? excludeId = null, CancellationToken cancellationToken = default);

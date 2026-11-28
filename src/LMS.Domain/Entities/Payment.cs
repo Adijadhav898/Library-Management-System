@@ -12,4 +12,5 @@ public class Payment : BaseEntity
     public DateTime PaidAt { get; set; } = DateTime.UtcNow;
     public Guid ReceivedById { get; set; }
     public User ReceivedBy { get; set; } = null!;
+    public string? Notes { get; set; }
 }

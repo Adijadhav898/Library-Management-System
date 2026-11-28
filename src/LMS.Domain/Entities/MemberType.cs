@@ -7,6 +7,7 @@ public class MemberType : BaseEntity
     public int LoanDays { get; set; }
     public int MaxRenewals { get; set; }
     public decimal FinePerDay { get; set; }
+    public int ReservationExpiryHours { get; set; } = 48;
 
     // Navigation properties
     public ICollection<Member> Members { get; set; } = new List<Member>();

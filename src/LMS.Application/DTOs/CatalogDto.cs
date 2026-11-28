@@ -98,9 +98,12 @@ public class BookDto : BaseDto
     public string? Subtitle { get; set; }
     public string ISBN { get; set; } = string.Empty;
     public string? Description { get; set; }
-    public int PublicationYear { get; set; }
+    public string? Edition { get; set; }
+    public int? PublicationYear { get; set; }
+    public int? Pages { get; set; }
+    public Guid UserId { get; set; }
     public string? Language { get; set; }
-    public int PageCount { get; set; }
+    
     public string? CoverImageUrl { get; set; }
     public Guid CategoryId { get; set; }
     public string CategoryName { get; set; } = string.Empty;
@@ -109,6 +112,7 @@ public class BookDto : BaseDto
     public List<AuthorDto> Authors { get; set; } = new();
     public int TotalCopies { get; set; }
     public int AvailableCopies { get; set; }
+    
 }
 
 public class BookSummaryDto
@@ -128,9 +132,10 @@ public class CreateBookRequest
     public string? Subtitle { get; set; }
     public string ISBN { get; set; } = string.Empty;
     public string? Description { get; set; }
-    public int PublicationYear { get; set; }
+    public int? PublicationYear { get; set; }
+    public string? Edition { get; set; }
     public string? Language { get; set; }
-    public int PageCount { get; set; }
+    public int? Pages { get; set; }
     public string? CoverImageUrl { get; set; }
     public Guid CategoryId { get; set; }
     public Guid PublisherId { get; set; }
@@ -144,8 +149,9 @@ public class UpdateBookRequest
     public string? ISBN { get; set; }
     public string? Description { get; set; }
     public int? PublicationYear { get; set; }
+    public string? Edition { get; set; }
     public string? Language { get; set; }
-    public int? PageCount { get; set; }
+    public int? Pages { get; set; }
     public string? CoverImageUrl { get; set; }
     public Guid? CategoryId { get; set; }
     public Guid? PublisherId { get; set; }
@@ -160,9 +166,10 @@ public class BookCopyDto : BaseDto
     public CopyStatus Status { get; set; }
     public string? Location { get; set; }
     public string? Barcode { get; set; }
-    public DateTime? AcquiredDate { get; set; }
-    public decimal? Price { get; set; }
+    public DateTime? AcquisitionDate { get; set; }
+    public decimal? Cost { get; set; }
     public string? Notes { get; set; }
+    public string? Condition { get; set; }
 }
 
 public class CreateBookCopyRequest
@@ -171,9 +178,11 @@ public class CreateBookCopyRequest
     public string CopyNumber { get; set; } = string.Empty;
     public string? Location { get; set; }
     public string? Barcode { get; set; }
-    public DateTime? AcquiredDate { get; set; }
-    public decimal? Price { get; set; }
+    public DateTime? AcquisitionDate { get; set; }
+    public decimal? Cost { get; set; }
+    public string? Condition { get; set; }
     public string? Notes { get; set; }
+    public CopyStatus Status { get; set; } = CopyStatus.Available;
 }
 
 public class UpdateBookCopyRequest
@@ -182,6 +191,9 @@ public class UpdateBookCopyRequest
     public string? Location { get; set; }
     public string? Barcode { get; set; }
     public string? Notes { get; set; }
+    public string? CopyNumber { get; set; }
+    public string? Condition { get; set; }
+    public decimal? Cost { get; set; }
 }
 
 public class CatalogPaginationRequest : PaginationRequest

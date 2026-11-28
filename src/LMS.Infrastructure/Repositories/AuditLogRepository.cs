@@ -10,29 +10,26 @@ public class AuditLogRepository : GenericRepository<AuditLog>, IAuditLogReposito
 {
     public AuditLogRepository(LibraryDbContext context) : base(context) { }
 
-    public async Task<PaginatedResult<AuditLog>> GetPagedAsync(PaginationRequest request, Guid? userId = null, string? entityType = null, Guid? entityId = null, string? action = null, DateTime? from = null, DateTime? to = null, CancellationToken cancellationToken = default)
+    public async Task<PaginatedResult<AuditLog>> GetPagedAsync(PaginationRequest request, string? entityName = null, string? entityId = null, Guid? userId = null, DateTime? fromDate = null, DateTime? toDate = null, CancellationToken cancellationToken = default)
     {
         var query = _dbSet
             .Include(a => a.User)
             .AsNoTracking();
 
+        if (!string.IsNullOrWhiteSpace(entityName))
+            query = query.Where(a => a.EntityName == entityName);
+
+        if (!string.IsNullOrWhiteSpace(entityId) && Guid.TryParse(entityId, out var entityGuid))
+            query = query.Where(a => a.EntityId == entityGuid);
+
         if (userId.HasValue)
             query = query.Where(a => a.UserId == userId.Value);
 
-        if (!string.IsNullOrWhiteSpace(entityType))
-            query = query.Where(a => a.EntityType == entityType);
+        if (fromDate.HasValue)
+            query = query.Where(a => a.CreatedAt >= fromDate.Value);
 
-        if (entityId.HasValue)
-            query = query.Where(a => a.EntityId == entityId.Value);
-
-        if (!string.IsNullOrWhiteSpace(action))
-            query = query.Where(a => a.Action == action);
-
-        if (from.HasValue)
-            query = query.Where(a => a.CreatedAt >= from.Value);
-
-        if (to.HasValue)
-            query = query.Where(a => a.CreatedAt <= to.Value);
+        if (toDate.HasValue)
+            query = query.Where(a => a.CreatedAt <= toDate.Value);
 
         var totalCount = await query.CountAsync(cancellationToken);
 
@@ -51,25 +48,13 @@ public class AuditLogRepository : GenericRepository<AuditLog>, IAuditLogReposito
         };
     }
 
-    public async Task<IEnumerable<AuditLog>> GetByEntityAsync(string entityType, Guid entityId, CancellationToken cancellationToken = default)
+    public async Task<IEnumerable<AuditLog>> GetByEntityAsync(string entityName, string entityId, CancellationToken cancellationToken = default)
     {
+        if (!Guid.TryParse(entityId, out var entityGuid))
+            return Enumerable.Empty<AuditLog>();
+
         return await _dbSet
-            .Where(a => a.EntityType == entityType && a.EntityId == entityId)
-            .OrderByDescending(a => a.CreatedAt)
-            .ToListAsync(cancellationToken);
-    }
-
-    public async Task<IEnumerable<AuditLog>> GetByUserAsync(Guid userId, DateTime? from = null, DateTime? to = null, CancellationToken cancellationToken = default)
-    {
-        var query = _dbSet.Where(a => a.UserId == userId);
-
-        if (from.HasValue)
-            query = query.Where(a => a.CreatedAt >= from.Value);
-
-        if (to.HasValue)
-            query = query.Where(a => a.CreatedAt <= to.Value);
-
-        return await query
+            .Where(a => a.EntityName == entityName && a.EntityId == entityGuid)
             .OrderByDescending(a => a.CreatedAt)
             .ToListAsync(cancellationToken);
     }

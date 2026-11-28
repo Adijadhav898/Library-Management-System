@@ -11,7 +11,9 @@ public class RefreshTokenRepository : GenericRepository<RefreshToken>, IRefreshT
 
     public async Task<RefreshToken?> GetByTokenAsync(string token, CancellationToken cancellationToken = default)
     {
-        return await _dbSet.FirstOrDefaultAsync(rt => rt.Token == token, cancellationToken);
+        return await _dbSet
+            .Include(rt => rt.User)
+            .FirstOrDefaultAsync(rt => rt.Token == token, cancellationToken);
     }
 
     public async Task<IEnumerable<RefreshToken>> GetByUserIdAsync(Guid userId, CancellationToken cancellationToken = default)
@@ -21,10 +23,13 @@ public class RefreshTokenRepository : GenericRepository<RefreshToken>, IRefreshT
 
     public async Task RevokeAllUserTokensAsync(Guid userId, CancellationToken cancellationToken = default)
     {
-        var tokens = await _dbSet.Where(rt => rt.UserId == userId && !rt.IsRevoked).ToListAsync(cancellationToken);
+        var tokens = await _dbSet
+            .Where(rt => rt.UserId == userId && rt.RevokedAt == null)
+            .ToListAsync(cancellationToken);
+
         foreach (var token in tokens)
         {
-            token.IsRevoked = true;
+            token.RevokedAt = DateTime.UtcNow;
         }
         _dbSet.UpdateRange(tokens);
     }

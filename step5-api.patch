@@ -1,0 +1,2305 @@
+diff --git a/src/LMS.API/Controllers/ApiControllerBase.cs b/src/LMS.API/Controllers/ApiControllerBase.cs
+new file mode 100644
+index 0000000..3e9fbd3
+--- /dev/null
++++ b/src/LMS.API/Controllers/ApiControllerBase.cs
+@@ -0,0 +1,20 @@
++using System.Security.Claims;
++using Microsoft.AspNetCore.Mvc;
++
++namespace LMS.API.Controllers;
++
++[ApiController]
++[Route("api/[controller]")]
++[Produces("application/json")]
++public abstract class ApiControllerBase : ControllerBase
++{
++    /// <summary>Id of the logged-in user (from the JWT NameIdentifier claim), or null.</summary>
++    protected Guid? CurrentUserId
++    {
++        get
++        {
++            var value = User.FindFirstValue(ClaimTypes.NameIdentifier) ?? User.FindFirstValue("sub");
++            return Guid.TryParse(value, out var id) ? id : null;
++        }
++    }
++}
+diff --git a/src/LMS.API/Controllers/AuthController.cs b/src/LMS.API/Controllers/AuthController.cs
+index e06b390..7de3ab9 100644
+--- a/src/LMS.API/Controllers/AuthController.cs
++++ b/src/LMS.API/Controllers/AuthController.cs
+@@ -1,191 +1,85 @@
+-using System.ComponentModel.DataAnnotations;
+-using LMS.Application.DTOs.Auth;
++using LMS.Application.DTOs;
+ using LMS.Application.Interfaces;
+ using Microsoft.AspNetCore.Authorization;
+ using Microsoft.AspNetCore.Mvc;
+ 
+ namespace LMS.API.Controllers;
+ 
+-[ApiController]
+-[Route("api/[controller]")]
+-[Produces("application/json")]
+-public class AuthController : ControllerBase
++public class AuthController : ApiControllerBase
+ {
+     private readonly IAuthService _authService;
+-    private readonly ILogger<AuthController> _logger;
+ 
+-    public AuthController(IAuthService authService, ILogger<AuthController> logger)
++    public AuthController(IAuthService authService)
+     {
+         _authService = authService;
+-        _logger = logger;
+     }
+ 
+-    /// <summary>
+-    /// Authenticate a user and return access and refresh tokens
+-    /// </summary>
++    /// <summary>Login and get access + refresh tokens.</summary>
+     [HttpPost("login")]
+     [AllowAnonymous]
+-    [ProducesResponseType(typeof(LoginResponseDto), StatusCodes.Status200OK)]
+-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+-    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+-    public async Task<ActionResult<LoginResponseDto>> Login([FromBody] LoginRequestDto request)
++    public async Task<ActionResult<LoginResponse>> Login([FromBody] LoginRequest request, CancellationToken ct)
+     {
+-        var result = await _authService.LoginAsync(request);
+-        if (result == null)
+-        {
+-            return Unauthorized(new { message = "Invalid email or password" });
+-        }
+-        return Ok(result);
++        var result = await _authService.LoginAsync(request, ct);
++        return result == null ? Unauthorized(new { message = "Invalid email or password" }) : Ok(result);
+     }
+ 
+-    /// <summary>
+-    /// Register a new user (Admin only)
+-    /// </summary>
++    /// <summary>Register a new user (Admin only).</summary>
+     [HttpPost("register")]
+     [Authorize(Policy = "AdminOnly")]
+-    [ProducesResponseType(typeof(LoginResponseDto), StatusCodes.Status201Created)]
+-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+-    [ProducesResponseType(StatusCodes.Status409Conflict)]
+-    public async Task<ActionResult<LoginResponseDto>> Register([FromBody] RegisterRequestDto request)
++    public async Task<ActionResult<LoginResponse>> Register([FromBody] RegisterRequest request, CancellationToken ct)
+     {
+-        try
+-        {
+-            var result = await _authService.RegisterAsync(request);
+-            return CreatedAtAction(nameof(GetProfile), new { }, result);
+-        }
+-        catch (InvalidOperationException ex)
+-        {
+-            return Conflict(new { message = ex.Message });
+-        }
++        var result = await _authService.RegisterAsync(request, ct);
++        return result == null ? BadRequest(new { message = "Registration failed (email may already exist)" }) : StatusCode(StatusCodes.Status201Created, result);
+     }
+ 
+-    /// <summary>
+-    /// Refresh access token using refresh token
+-    /// </summary>
+-    [HttpPost("refresh")]
++    [HttpPost("refresh-token")]
+     [AllowAnonymous]
+-    [ProducesResponseType(typeof(LoginResponseDto), StatusCodes.Status200OK)]
+-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+-    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+-    public async Task<ActionResult<LoginResponseDto>> RefreshToken([FromBody] RefreshTokenRequestDto request)
++    public async Task<ActionResult<RefreshTokenResponse>> RefreshToken([FromBody] RefreshTokenRequest request, CancellationToken ct)
+     {
+-        var result = await _authService.RefreshTokenAsync(request);
+-        if (result == null)
+-        {
+-            return Unauthorized(new { message = "Invalid or expired refresh token" });
+-        }
+-        return Ok(result);
++        var result = await _authService.RefreshTokenAsync(request, ct);
++        return result == null ? Unauthorized(new { message = "Invalid or expired refresh token" }) : Ok(result);
+     }
+ 
+-    /// <summary>
+-    /// Revoke refresh token (logout)
+-    /// </summary>
+-    [HttpPost("revoke")]
++    [HttpPost("logout")]
+     [Authorize]
+-    [ProducesResponseType(StatusCodes.Status200OK)]
+-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+-    public async Task<IActionResult> RevokeToken([FromBody] RevokeTokenRequestDto request)
++    public async Task<IActionResult> Logout([FromBody] RefreshTokenRequest request, CancellationToken ct)
+     {
+-        var result = await _authService.RevokeTokenAsync(request);
+-        if (!result)
+-        {
+-            return BadRequest(new { message = "Invalid token" });
+-        }
+-        return Ok(new { message = "Token revoked successfully" });
++        var ok = await _authService.RevokeTokenAsync(request.RefreshToken, ct);
++        return ok ? Ok(new { message = "Logged out" }) : BadRequest(new { message = "Invalid token" });
+     }
+ 
+-    /// <summary>
+-    /// Change user password
+-    /// </summary>
+     [HttpPost("change-password")]
+     [Authorize]
+-    [ProducesResponseType(StatusCodes.Status200OK)]
+-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+-    public async Task<IActionResult> ChangePassword([FromBody] ChangePasswordRequestDto request)
++    public async Task<IActionResult> ChangePassword([FromBody] ChangePasswordRequest request, CancellationToken ct)
+     {
+-        var userId = GetCurrentUserId();
+-        var result = await _authService.ChangePasswordAsync(userId, request);
+-        if (!result)
+-        {
+-            return BadRequest(new { message = "Current password is incorrect" });
+-        }
+-        return Ok(new { message = "Password changed successfully" });
++        if (CurrentUserId is not Guid userId) return Unauthorized();
++        var ok = await _authService.ChangePasswordAsync(userId, request, ct);
++        return ok ? Ok(new { message = "Password changed" }) : BadRequest(new { message = "Current password is incorrect" });
+     }
+ 
+-    /// <summary>
+-    /// Request password reset
+-    /// </summary>
+     [HttpPost("forgot-password")]
+     [AllowAnonymous]
+-    [ProducesResponseType(StatusCodes.Status200OK)]
+-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+-    public async Task<IActionResult> ForgotPassword([FromBody] ForgotPasswordRequestDto request)
++    public async Task<IActionResult> ForgotPassword([FromBody] ForgotPasswordRequest request, CancellationToken ct)
+     {
+-        await _authService.ForgotPasswordAsync(request);
+-        return Ok(new { message = "If the email exists, a password reset link has been sent" });
++        await _authService.ForgotPasswordAsync(request, ct);
++        // Always same response so we don't reveal which emails exist.
++        return Ok(new { message = "If the email exists, a reset link has been sent" });
+     }
+ 
+-    /// <summary>
+-    /// Reset password using token
+-    /// </summary>
+     [HttpPost("reset-password")]
+     [AllowAnonymous]
+-    [ProducesResponseType(StatusCodes.Status200OK)]
+-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+-    public async Task<IActionResult> ResetPassword([FromBody] ResetPasswordRequestDto request)
++    public async Task<IActionResult> ResetPassword([FromBody] ResetPasswordRequest request, CancellationToken ct)
+     {
+-        var result = await _authService.ResetPasswordAsync(request);
+-        if (!result)
+-        {
+-            return BadRequest(new { message = "Invalid or expired reset token" });
+-        }
+-        return Ok(new { message = "Password reset successfully" });
++        var ok = await _authService.ResetPasswordAsync(request, ct);
++        return ok ? Ok(new { message = "Password reset" }) : BadRequest(new { message = "Invalid or expired token" });
+     }
+ 
+-    /// <summary>
+-    /// Get current user profile
+-    /// </summary>
+-    [HttpGet("profile")]
++    [HttpGet("me")]
+     [Authorize]
+-    [ProducesResponseType(typeof(UserProfileDto), StatusCodes.Status200OK)]
+-    [ProducesResponseType(StatusCodes.Status404NotFound)]
+-    public async Task<ActionResult<UserProfileDto>> GetProfile()
++    public async Task<ActionResult<UserDto>> Me(CancellationToken ct)
+     {
+-        var userId = GetCurrentUserId();
+-        var profile = await _authService.GetProfileAsync(userId);
+-        if (profile == null)
+-        {
+-            return NotFound(new { message = "User not found" });
+-        }
+-        return Ok(profile);
++        if (CurrentUserId is not Guid userId) return Unauthorized();
++        var user = await _authService.GetCurrentUserAsync(userId, ct);
++        return user == null ? NotFound() : Ok(user);
+     }
+-
+-    /// <summary>
+-    /// Update current user profile
+-    /// </summary>
+-    [HttpPut("profile")]
+-    [Authorize]
+-    [ProducesResponseType(typeof(UserProfileDto), StatusCodes.Status200OK)]
+-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+-    [ProducesResponseType(StatusCodes.Status404NotFound)]
+-    public async Task<ActionResult<UserProfileDto>> UpdateProfile([FromBody] UpdateProfileRequestDto request)
+-    {
+-        var userId = GetCurrentUserId();
+-        var profile = await _authService.UpdateProfileAsync(userId, request);
+-        if (profile == null)
+-        {
+-            return NotFound(new { message = "User not found" });
+-        }
+-        return Ok(profile);
+-    }
+-
+-    private Guid GetCurrentUserId()
+-    {
+-        var userIdClaim = User.FindFirst("sub")?.Value ?? User.FindFirst("userId")?.Value;
+-        if (string.IsNullOrEmpty(userIdClaim) || !Guid.TryParse(userIdClaim, out var userId))
+-        {
+-            throw new UnauthorizedAccessException("Invalid user token");
+-        }
+-        return userId;
+-    }
+-}
+\ No newline at end of file
++}
+diff --git a/src/LMS.API/Controllers/CatalogController.cs b/src/LMS.API/Controllers/CatalogController.cs
+index 33b757c..4e9d259 100644
+--- a/src/LMS.API/Controllers/CatalogController.cs
++++ b/src/LMS.API/Controllers/CatalogController.cs
+@@ -1,465 +1,195 @@
+-using LMS.Application.DTOs.Catalog;
++using LMS.Application.DTOs;
+ using LMS.Application.Interfaces;
++using LMS.Domain.Enums;
+ using Microsoft.AspNetCore.Authorization;
+ using Microsoft.AspNetCore.Mvc;
+ 
+ namespace LMS.API.Controllers;
+ 
+-[ApiController]
+-[Route("api/[controller]")]
+-[Authorize(Policy = "LibrarianOrAdmin")]
+-[Produces("application/json")]
+-public class CatalogController : ControllerBase
++/// <summary>Books, authors, categories, publishers and book copies. Any logged-in user can read; staff can write.</summary>
++[Authorize]
++public class CatalogController : ApiControllerBase
+ {
+-    private readonly ICatalogService _catalogService;
+-    private readonly ILogger<CatalogController> _logger;
++    private readonly ICatalogService _catalog;
+ 
+-    public CatalogController(ICatalogService catalogService, ILogger<CatalogController> logger)
++    public CatalogController(ICatalogService catalog)
+     {
+-        _catalogService = catalogService;
+-        _logger = logger;
++        _catalog = catalog;
+     }
+ 
+-    #region Categories
++    // ---------- Categories ----------
+ 
+-    /// <summary>
+-    /// Get all categories with pagination
+-    /// </summary>
+     [HttpGet("categories")]
+-    [AllowAnonymous]
+-    [ProducesResponseType(typeof(PagedResultDto<CategoryDto>), StatusCodes.Status200OK)]
+-    public async Task<ActionResult<PagedResultDto<CategoryDto>>> GetCategories(
+-        [FromQuery] int page = 1,
+-        [FromQuery] int pageSize = 10,
+-        [FromQuery] string? search = null)
+-    {
+-        var result = await _catalogService.GetCategoriesAsync(page, pageSize, search);
+-        return Ok(result);
+-    }
++    public async Task<ActionResult<PaginatedResult<CategoryDto>>> GetCategories([FromQuery] PaginationRequest request, [FromQuery] string? search, CancellationToken ct)
++        => Ok(await _catalog.GetCategoriesAsync(request, search, ct));
+ 
+-    /// <summary>
+-    /// Get category by ID
+-    /// </summary>
+     [HttpGet("categories/{id:guid}")]
+-    [AllowAnonymous]
+-    [ProducesResponseType(typeof(CategoryDto), StatusCodes.Status200OK)]
+-    [ProducesResponseType(StatusCodes.Status404NotFound)]
+-    public async Task<ActionResult<CategoryDto>> GetCategory(Guid id)
++    public async Task<ActionResult<CategoryDto>> GetCategoryById(Guid id, CancellationToken ct)
+     {
+-        var category = await _catalogService.GetCategoryByIdAsync(id);
+-        if (category == null)
+-        {
+-            return NotFound(new { message = "Category not found" });
+-        }
+-        return Ok(category);
++        var item = await _catalog.GetCategoryByIdAsync(id, ct);
++        return item == null ? NotFound() : Ok(item);
+     }
+ 
+-    /// <summary>
+-    /// Create a new category
+-    /// </summary>
+     [HttpPost("categories")]
+-    [ProducesResponseType(typeof(CategoryDto), StatusCodes.Status201Created)]
+-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+-    public async Task<ActionResult<CategoryDto>> CreateCategory([FromBody] CreateCategoryRequestDto request)
++    [Authorize(Policy = "LibrarianOrAdmin")]
++    public async Task<ActionResult<CategoryDto>> CreateCategory([FromBody] CreateCategoryRequest request, CancellationToken ct)
+     {
+-        var category = await _catalogService.CreateCategoryAsync(request);
+-        return CreatedAtAction(nameof(GetCategory), new { id = category.Id }, category);
++        var item = await _catalog.CreateCategoryAsync(request, ct);
++        return CreatedAtAction(nameof(GetCategoryById), new { id = item.Id }, item);
+     }
+ 
+-    /// <summary>
+-    /// Update category
+-    /// </summary>
+     [HttpPut("categories/{id:guid}")]
+-    [ProducesResponseType(typeof(CategoryDto), StatusCodes.Status200OK)]
+-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+-    [ProducesResponseType(StatusCodes.Status404NotFound)]
+-    public async Task<ActionResult<CategoryDto>> UpdateCategory(Guid id, [FromBody] UpdateCategoryRequestDto request)
++    [Authorize(Policy = "LibrarianOrAdmin")]
++    public async Task<ActionResult<CategoryDto>> UpdateCategory(Guid id, [FromBody] UpdateCategoryRequest request, CancellationToken ct)
+     {
+-        var category = await _catalogService.UpdateCategoryAsync(id, request);
+-        if (category == null)
+-        {
+-            return NotFound(new { message = "Category not found" });
+-        }
+-        return Ok(category);
++        var item = await _catalog.UpdateCategoryAsync(id, request, ct);
++        return item == null ? NotFound() : Ok(item);
+     }
+ 
+-    /// <summary>
+-    /// Delete category
+-    /// </summary>
+     [HttpDelete("categories/{id:guid}")]
+-    [ProducesResponseType(StatusCodes.Status204NoContent)]
+-    [ProducesResponseType(StatusCodes.Status404NotFound)]
+-    public async Task<IActionResult> DeleteCategory(Guid id)
+-    {
+-        var result = await _catalogService.DeleteCategoryAsync(id);
+-        if (!result)
+-        {
+-            return NotFound(new { message = "Category not found" });
+-        }
+-        return NoContent();
+-    }
++    [Authorize(Policy = "AdminOnly")]
++    public async Task<IActionResult> DeleteCategory(Guid id, CancellationToken ct)
++        => await _catalog.DeleteCategoryAsync(id, ct) ? NoContent() : NotFound();
+ 
+-    #endregion
++    // ---------- Publishers ----------
+ 
+-    #region Publishers
+-
+-    /// <summary>
+-    /// Get all publishers with pagination
+-    /// </summary>
+     [HttpGet("publishers")]
+-    [AllowAnonymous]
+-    [ProducesResponseType(typeof(PagedResultDto<PublisherDto>), StatusCodes.Status200OK)]
+-    public async Task<ActionResult<PagedResultDto<PublisherDto>>> GetPublishers(
+-        [FromQuery] int page = 1,
+-        [FromQuery] int pageSize = 10,
+-        [FromQuery] string? search = null)
+-    {
+-        var result = await _catalogService.GetPublishersAsync(page, pageSize, search);
+-        return Ok(result);
+-    }
++    public async Task<ActionResult<PaginatedResult<PublisherDto>>> GetPublishers([FromQuery] PaginationRequest request, [FromQuery] string? search, CancellationToken ct)
++        => Ok(await _catalog.GetPublishersAsync(request, search, ct));
+ 
+-    /// <summary>
+-    /// Get publisher by ID
+-    /// </summary>
+     [HttpGet("publishers/{id:guid}")]
+-    [AllowAnonymous]
+-    [ProducesResponseType(typeof(PublisherDto), StatusCodes.Status200OK)]
+-    [ProducesResponseType(StatusCodes.Status404NotFound)]
+-    public async Task<ActionResult<PublisherDto>> GetPublisher(Guid id)
++    public async Task<ActionResult<PublisherDto>> GetPublisherById(Guid id, CancellationToken ct)
+     {
+-        var publisher = await _catalogService.GetPublisherByIdAsync(id);
+-        if (publisher == null)
+-        {
+-            return NotFound(new { message = "Publisher not found" });
+-        }
+-        return Ok(publisher);
++        var item = await _catalog.GetPublisherByIdAsync(id, ct);
++        return item == null ? NotFound() : Ok(item);
+     }
+ 
+-    /// <summary>
+-    /// Create a new publisher
+-    /// </summary>
+     [HttpPost("publishers")]
+-    [ProducesResponseType(typeof(PublisherDto), StatusCodes.Status201Created)]
+-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+-    public async Task<ActionResult<PublisherDto>> CreatePublisher([FromBody] CreatePublisherRequestDto request)
++    [Authorize(Policy = "LibrarianOrAdmin")]
++    public async Task<ActionResult<PublisherDto>> CreatePublisher([FromBody] CreatePublisherRequest request, CancellationToken ct)
+     {
+-        var publisher = await _catalogService.CreatePublisherAsync(request);
+-        return CreatedAtAction(nameof(GetPublisher), new { id = publisher.Id }, publisher);
++        var item = await _catalog.CreatePublisherAsync(request, ct);
++        return CreatedAtAction(nameof(GetPublisherById), new { id = item.Id }, item);
+     }
+ 
+-    /// <summary>
+-    /// Update publisher
+-    /// </summary>
+     [HttpPut("publishers/{id:guid}")]
+-    [ProducesResponseType(typeof(PublisherDto), StatusCodes.Status200OK)]
+-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+-    [ProducesResponseType(StatusCodes.Status404NotFound)]
+-    public async Task<ActionResult<PublisherDto>> UpdatePublisher(Guid id, [FromBody] UpdatePublisherRequestDto request)
++    [Authorize(Policy = "LibrarianOrAdmin")]
++    public async Task<ActionResult<PublisherDto>> UpdatePublisher(Guid id, [FromBody] UpdatePublisherRequest request, CancellationToken ct)
+     {
+-        var publisher = await _catalogService.UpdatePublisherAsync(id, request);
+-        if (publisher == null)
+-        {
+-            return NotFound(new { message = "Publisher not found" });
+-        }
+-        return Ok(publisher);
++        var item = await _catalog.UpdatePublisherAsync(id, request, ct);
++        return item == null ? NotFound() : Ok(item);
+     }
+ 
+-    /// <summary>
+-    /// Delete publisher
+-    /// </summary>
+     [HttpDelete("publishers/{id:guid}")]
+-    [ProducesResponseType(StatusCodes.Status204NoContent)]
+-    [ProducesResponseType(StatusCodes.Status404NotFound)]
+-    public async Task<IActionResult> DeletePublisher(Guid id)
+-    {
+-        var result = await _catalogService.DeletePublisherAsync(id);
+-        if (!result)
+-        {
+-            return NotFound(new { message = "Publisher not found" });
+-        }
+-        return NoContent();
+-    }
+-
+-    #endregion
++    [Authorize(Policy = "AdminOnly")]
++    public async Task<IActionResult> DeletePublisher(Guid id, CancellationToken ct)
++        => await _catalog.DeletePublisherAsync(id, ct) ? NoContent() : NotFound();
+ 
+-    #region Authors
++    // ---------- Authors ----------
+ 
+-    /// <summary>
+-    /// Get all authors with pagination
+-    /// </summary>
+     [HttpGet("authors")]
+-    [AllowAnonymous]
+-    [ProducesResponseType(typeof(PagedResultDto<AuthorDto>), StatusCodes.Status200OK)]
+-    public async Task<ActionResult<PagedResultDto<AuthorDto>>> GetAuthors(
+-        [FromQuery] int page = 1,
+-        [FromQuery] int pageSize = 10,
+-        [FromQuery] string? search = null)
+-    {
+-        var result = await _catalogService.GetAuthorsAsync(page, pageSize, search);
+-        return Ok(result);
+-    }
++    public async Task<ActionResult<PaginatedResult<AuthorDto>>> GetAuthors([FromQuery] PaginationRequest request, [FromQuery] string? search, CancellationToken ct)
++        => Ok(await _catalog.GetAuthorsAsync(request, search, ct));
+ 
+-    /// <summary>
+-    /// Get author by ID
+-    /// </summary>
+     [HttpGet("authors/{id:guid}")]
+-    [AllowAnonymous]
+-    [ProducesResponseType(typeof(AuthorDto), StatusCodes.Status200OK)]
+-    [ProducesResponseType(StatusCodes.Status404NotFound)]
+-    public async Task<ActionResult<AuthorDto>> GetAuthor(Guid id)
++    public async Task<ActionResult<AuthorDto>> GetAuthorById(Guid id, CancellationToken ct)
+     {
+-        var author = await _catalogService.GetAuthorByIdAsync(id);
+-        if (author == null)
+-        {
+-            return NotFound(new { message = "Author not found" });
+-        }
+-        return Ok(author);
++        var item = await _catalog.GetAuthorByIdAsync(id, ct);
++        return item == null ? NotFound() : Ok(item);
+     }
+ 
+-    /// <summary>
+-    /// Create a new author
+-    /// </summary>
+     [HttpPost("authors")]
+-    [ProducesResponseType(typeof(AuthorDto), StatusCodes.Status201Created)]
+-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+-    public async Task<ActionResult<AuthorDto>> CreateAuthor([FromBody] CreateAuthorRequestDto request)
++    [Authorize(Policy = "LibrarianOrAdmin")]
++    public async Task<ActionResult<AuthorDto>> CreateAuthor([FromBody] CreateAuthorRequest request, CancellationToken ct)
+     {
+-        var author = await _catalogService.CreateAuthorAsync(request);
+-        return CreatedAtAction(nameof(GetAuthor), new { id = author.Id }, author);
++        var item = await _catalog.CreateAuthorAsync(request, ct);
++        return CreatedAtAction(nameof(GetAuthorById), new { id = item.Id }, item);
+     }
+ 
+-    /// <summary>
+-    /// Update author
+-    /// </summary>
+     [HttpPut("authors/{id:guid}")]
+-    [ProducesResponseType(typeof(AuthorDto), StatusCodes.Status200OK)]
+-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+-    [ProducesResponseType(StatusCodes.Status404NotFound)]
+-    public async Task<ActionResult<AuthorDto>> UpdateAuthor(Guid id, [FromBody] UpdateAuthorRequestDto request)
++    [Authorize(Policy = "LibrarianOrAdmin")]
++    public async Task<ActionResult<AuthorDto>> UpdateAuthor(Guid id, [FromBody] UpdateAuthorRequest request, CancellationToken ct)
+     {
+-        var author = await _catalogService.UpdateAuthorAsync(id, request);
+-        if (author == null)
+-        {
+-            return NotFound(new { message = "Author not found" });
+-        }
+-        return Ok(author);
++        var item = await _catalog.UpdateAuthorAsync(id, request, ct);
++        return item == null ? NotFound() : Ok(item);
+     }
+ 
+-    /// <summary>
+-    /// Delete author
+-    /// </summary>
+     [HttpDelete("authors/{id:guid}")]
+-    [ProducesResponseType(StatusCodes.Status204NoContent)]
+-    [ProducesResponseType(StatusCodes.Status404NotFound)]
+-    public async Task<IActionResult> DeleteAuthor(Guid id)
+-    {
+-        var result = await _catalogService.DeleteAuthorAsync(id);
+-        if (!result)
+-        {
+-            return NotFound(new { message = "Author not found" });
+-        }
+-        return NoContent();
+-    }
+-
+-    #endregion
++    [Authorize(Policy = "AdminOnly")]
++    public async Task<IActionResult> DeleteAuthor(Guid id, CancellationToken ct)
++        => await _catalog.DeleteAuthorAsync(id, ct) ? NoContent() : NotFound();
+ 
+-    #region Books
++    // ---------- Books ----------
+ 
+-    /// <summary>
+-    /// Get all books with pagination and filters
+-    /// </summary>
+     [HttpGet("books")]
+-    [AllowAnonymous]
+-    [ProducesResponseType(typeof(PagedResultDto<BookDto>), StatusCodes.Status200OK)]
+-    public async Task<ActionResult<PagedResultDto<BookDto>>> GetBooks(
+-        [FromQuery] int page = 1,
+-        [FromQuery] int pageSize = 10,
+-        [FromQuery] string? search = null,
+-        [FromQuery] Guid? categoryId = null,
+-        [FromQuery] Guid? publisherId = null,
+-        [FromQuery] Guid? authorId = null,
+-        [FromQuery] bool? isAvailable = null)
+-    {
+-        var result = await _catalogService.GetBooksAsync(page, pageSize, search, categoryId, publisherId, authorId, isAvailable);
+-        return Ok(result);
+-    }
++    public async Task<ActionResult<PaginatedResult<BookDto>>> GetBooks([FromQuery] CatalogPaginationRequest request, [FromQuery] string? search, CancellationToken ct)
++        => Ok(await _catalog.GetBooksAsync(request, request.CategoryId, request.PublisherId, search, ct));
++
++    [HttpGet("books/search")]
++    public async Task<ActionResult<IEnumerable<BookSummaryDto>>> SearchBooks([FromQuery] string q, [FromQuery] int maxResults = 10, CancellationToken ct = default)
++        => Ok(await _catalog.SearchBooksAsync(q, maxResults, ct));
+ 
+-    /// <summary>
+-    /// Get book by ID
+-    /// </summary>
+     [HttpGet("books/{id:guid}")]
+-    [AllowAnonymous]
+-    [ProducesResponseType(typeof(BookDto), StatusCodes.Status200OK)]
+-    [ProducesResponseType(StatusCodes.Status404NotFound)]
+-    public async Task<ActionResult<BookDto>> GetBook(Guid id)
++    public async Task<ActionResult<BookDto>> GetBookById(Guid id, CancellationToken ct)
+     {
+-        var book = await _catalogService.GetBookByIdAsync(id);
+-        if (book == null)
+-        {
+-            return NotFound(new { message = "Book not found" });
+-        }
+-        return Ok(book);
++        var book = await _catalog.GetBookByIdAsync(id, ct);
++        return book == null ? NotFound() : Ok(book);
+     }
+ 
+-    /// <summary>
+-    /// Create a new book
+-    /// </summary>
+     [HttpPost("books")]
+-    [ProducesResponseType(typeof(BookDto), StatusCodes.Status201Created)]
+-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+-    public async Task<ActionResult<BookDto>> CreateBook([FromBody] CreateBookRequestDto request)
++    [Authorize(Policy = "LibrarianOrAdmin")]
++    public async Task<ActionResult<BookDto>> CreateBook([FromBody] CreateBookRequest request, CancellationToken ct)
+     {
+-        var book = await _catalogService.CreateBookAsync(request);
+-        return CreatedAtAction(nameof(GetBook), new { id = book.Id }, book);
++        var book = await _catalog.CreateBookAsync(request, ct);
++        return CreatedAtAction(nameof(GetBookById), new { id = book.Id }, book);
+     }
+ 
+-    /// <summary>
+-    /// Update book
+-    /// </summary>
+     [HttpPut("books/{id:guid}")]
+-    [ProducesResponseType(typeof(BookDto), StatusCodes.Status200OK)]
+-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+-    [ProducesResponseType(StatusCodes.Status404NotFound)]
+-    public async Task<ActionResult<BookDto>> UpdateBook(Guid id, [FromBody] UpdateBookRequestDto request)
++    [Authorize(Policy = "LibrarianOrAdmin")]
++    public async Task<ActionResult<BookDto>> UpdateBook(Guid id, [FromBody] UpdateBookRequest request, CancellationToken ct)
+     {
+-        var book = await _catalogService.UpdateBookAsync(id, request);
+-        if (book == null)
+-        {
+-            return NotFound(new { message = "Book not found" });
+-        }
+-        return Ok(book);
++        var book = await _catalog.UpdateBookAsync(id, request, ct);
++        return book == null ? NotFound() : Ok(book);
+     }
+ 
+-    /// <summary>
+-    /// Delete book
+-    /// </summary>
+     [HttpDelete("books/{id:guid}")]
+-    [ProducesResponseType(StatusCodes.Status204NoContent)]
+-    [ProducesResponseType(StatusCodes.Status404NotFound)]
+-    public async Task<IActionResult> DeleteBook(Guid id)
+-    {
+-        var result = await _catalogService.DeleteBookAsync(id);
+-        if (!result)
+-        {
+-            return NotFound(new { message = "Book not found" });
+-        }
+-        return NoContent();
+-    }
++    [Authorize(Policy = "AdminOnly")]
++    public async Task<IActionResult> DeleteBook(Guid id, CancellationToken ct)
++        => await _catalog.DeleteBookAsync(id, ct) ? NoContent() : NotFound();
+ 
+-    /// <summary>
+-    /// Add author to book
+-    /// </summary>
+-    [HttpPost("books/{bookId:guid}/authors")]
+-    [ProducesResponseType(StatusCodes.Status200OK)]
+-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+-    [ProducesResponseType(StatusCodes.Status404NotFound)]
+-    public async Task<IActionResult> AddAuthorToBook(Guid bookId, [FromBody] AddAuthorToBookRequestDto request)
+-    {
+-        var result = await _catalogService.AddAuthorToBookAsync(bookId, request.AuthorId);
+-        if (!result)
+-        {
+-            return BadRequest(new { message = "Failed to add author. Book or author not found." });
+-        }
+-        return Ok(new { message = "Author added to book successfully" });
+-    }
++    // ---------- Book copies ----------
+ 
+-    /// <summary>
+-    /// Remove author from book
+-    /// </summary>
+-    [HttpDelete("books/{bookId:guid}/authors/{authorId:guid}")]
+-    [ProducesResponseType(StatusCodes.Status200OK)]
+-    [ProducesResponseType(StatusCodes.Status404NotFound)]
+-    public async Task<IActionResult> RemoveAuthorFromBook(Guid bookId, Guid authorId)
+-    {
+-        var result = await _catalogService.RemoveAuthorFromBookAsync(bookId, authorId);
+-        if (!result)
+-        {
+-            return NotFound(new { message = "Book or author not found" });
+-        }
+-        return Ok(new { message = "Author removed from book successfully" });
+-    }
+-
+-    #endregion
+-
+-    #region Book Copies
+-
+-    /// <summary>
+-    /// Get all book copies with pagination
+-    /// </summary>
+-    [HttpGet("books/{bookId:guid}/copies")]
+-    [AllowAnonymous]
+-    [ProducesResponseType(typeof(PagedResultDto<BookCopyDto>), StatusCodes.Status200OK)]
+-    public async Task<ActionResult<PagedResultDto<BookCopyDto>>> GetBookCopies(
+-        Guid bookId,
+-        [FromQuery] int page = 1,
+-        [FromQuery] int pageSize = 10,
+-        [FromQuery] string? status = null)
+-    {
+-        var result = await _catalogService.GetBookCopiesAsync(bookId, page, pageSize, status);
+-        return Ok(result);
+-    }
++    [HttpGet("copies")]
++    [Authorize(Policy = "LibrarianOrAdmin")]
++    public async Task<ActionResult<PaginatedResult<BookCopyDto>>> GetCopies([FromQuery] PaginationRequest request, [FromQuery] Guid? bookId, [FromQuery] CopyStatus? status, CancellationToken ct)
++        => Ok(await _catalog.GetBookCopiesAsync(request, bookId, status, ct));
+ 
+-    /// <summary>
+-    /// Get book copy by ID
+-    /// </summary>
+     [HttpGet("copies/{id:guid}")]
+-    [AllowAnonymous]
+-    [ProducesResponseType(typeof(BookCopyDto), StatusCodes.Status200OK)]
+-    [ProducesResponseType(StatusCodes.Status404NotFound)]
+-    public async Task<ActionResult<BookCopyDto>> GetBookCopy(Guid id)
++    [Authorize(Policy = "LibrarianOrAdmin")]
++    public async Task<ActionResult<BookCopyDto>> GetBookCopyById(Guid id, CancellationToken ct)
+     {
+-        var copy = await _catalogService.GetBookCopyByIdAsync(id);
+-        if (copy == null)
+-        {
+-            return NotFound(new { message = "Book copy not found" });
+-        }
+-        return Ok(copy);
++        var copy = await _catalog.GetBookCopyByIdAsync(id, ct);
++        return copy == null ? NotFound() : Ok(copy);
+     }
+ 
+-    /// <summary>
+-    /// Create a new book copy
+-    /// </summary>
+-    [HttpPost("books/{bookId:guid}/copies")]
+-    [ProducesResponseType(typeof(BookCopyDto), StatusCodes.Status201Created)]
+-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+-    public async Task<ActionResult<BookCopyDto>> CreateBookCopy(Guid bookId, [FromBody] CreateBookCopyRequestDto request)
++    [HttpPost("copies")]
++    [Authorize(Policy = "LibrarianOrAdmin")]
++    public async Task<ActionResult<BookCopyDto>> CreateBookCopy([FromBody] CreateBookCopyRequest request, CancellationToken ct)
+     {
+-        var copy = await _catalogService.CreateBookCopyAsync(bookId, request);
+-        return CreatedAtAction(nameof(GetBookCopy), new { id = copy.Id }, copy);
++        var copy = await _catalog.CreateBookCopyAsync(request, ct);
++        return CreatedAtAction(nameof(GetBookCopyById), new { id = copy.Id }, copy);
+     }
+ 
+-    /// <summary>
+-    /// Update book copy
+-    /// </summary>
+     [HttpPut("copies/{id:guid}")]
+-    [ProducesResponseType(typeof(BookCopyDto), StatusCodes.Status200OK)]
+-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+-    [ProducesResponseType(StatusCodes.Status404NotFound)]
+-    public async Task<ActionResult<BookCopyDto>> UpdateBookCopy(Guid id, [FromBody] UpdateBookCopyRequestDto request)
++    [Authorize(Policy = "LibrarianOrAdmin")]
++    public async Task<ActionResult<BookCopyDto>> UpdateBookCopy(Guid id, [FromBody] UpdateBookCopyRequest request, CancellationToken ct)
+     {
+-        var copy = await _catalogService.UpdateBookCopyAsync(id, request);
+-        if (copy == null)
+-        {
+-            return NotFound(new { message = "Book copy not found" });
+-        }
+-        return Ok(copy);
++        var copy = await _catalog.UpdateBookCopyAsync(id, request, ct);
++        return copy == null ? NotFound() : Ok(copy);
+     }
+ 
+-    /// <summary>
+-    /// Delete book copy
+-    /// </summary>
+     [HttpDelete("copies/{id:guid}")]
+-    [ProducesResponseType(StatusCodes.Status204NoContent)]
+-    [ProducesResponseType(StatusCodes.Status404NotFound)]
+-    public async Task<IActionResult> DeleteBookCopy(Guid id)
+-    {
+-        var result = await _catalogService.DeleteBookCopyAsync(id);
+-        if (!result)
+-        {
+-            return NotFound(new { message = "Book copy not found" });
+-        }
+-        return NoContent();
+-    }
+-
+-    #endregion
+-}
+\ No newline at end of file
++    [Authorize(Policy = "AdminOnly")]
++    public async Task<IActionResult> DeleteBookCopy(Guid id, CancellationToken ct)
++        => await _catalog.DeleteBookCopyAsync(id, ct) ? NoContent() : NotFound();
++}
+diff --git a/src/LMS.API/Controllers/CirculationController.cs b/src/LMS.API/Controllers/CirculationController.cs
+index ea8f951..06744c5 100644
+--- a/src/LMS.API/Controllers/CirculationController.cs
++++ b/src/LMS.API/Controllers/CirculationController.cs
+@@ -1,352 +1,143 @@
+-using LMS.Application.DTOs.Circulation;
++using LMS.Application.DTOs;
+ using LMS.Application.Interfaces;
++using LMS.Domain.Enums;
+ using Microsoft.AspNetCore.Authorization;
+ using Microsoft.AspNetCore.Mvc;
+ 
+ namespace LMS.API.Controllers;
+ 
+-[ApiController]
+-[Route("api/[controller]")]
++/// <summary>Loans, reservations, fines and payments. Staff only.</summary>
+ [Authorize(Policy = "LibrarianOrAdmin")]
+-[Produces("application/json")]
+-public class CirculationController : ControllerBase
++public class CirculationController : ApiControllerBase
+ {
+-    private readonly ICirculationService _circulationService;
+-    private readonly ILogger<CirculationController> _logger;
++    private readonly ICirculationService _circulation;
+ 
+-    public CirculationController(ICirculationService circulationService, ILogger<CirculationController> logger)
++    public CirculationController(ICirculationService circulation)
+     {
+-        _circulationService = circulationService;
+-        _logger = logger;
++        _circulation = circulation;
+     }
+ 
+-    #region Loans
++    // ---------- Loans ----------
+ 
+-    /// <summary>
+-    /// Get all loans with pagination and filters
+-    /// </summary>
+     [HttpGet("loans")]
+-    [ProducesResponseType(typeof(PagedResultDto<LoanDto>), StatusCodes.Status200OK)]
+-    public async Task<ActionResult<PagedResultDto<LoanDto>>> GetLoans(
+-        [FromQuery] int page = 1,
+-        [FromQuery] int pageSize = 10,
+-        [FromQuery] string? search = null,
+-        [FromQuery] Guid? memberId = null,
+-        [FromQuery] Guid? bookCopyId = null,
+-        [FromQuery] string? status = null,
+-        [FromQuery] bool? isOverdue = null)
+-    {
+-        var result = await _circulationService.GetLoansAsync(page, pageSize, search, memberId, bookCopyId, status, isOverdue);
+-        return Ok(result);
+-    }
+-
+-    /// <summary>
+-    /// Get loan by ID
+-    /// </summary>
+-    [HttpGet("loans/{id:guid}")]
+-    [ProducesResponseType(typeof(LoanDto), StatusCodes.Status200OK)]
+-    [ProducesResponseType(StatusCodes.Status404NotFound)]
+-    public async Task<ActionResult<LoanDto>> GetLoan(Guid id)
+-    {
+-        var loan = await _circulationService.GetLoanByIdAsync(id);
+-        if (loan == null)
+-        {
+-            return NotFound(new { message = "Loan not found" });
+-        }
+-        return Ok(loan);
+-    }
++    public async Task<ActionResult<PaginatedResult<LoanDto>>> GetLoans([FromQuery] CirculationPaginationRequest request, CancellationToken ct)
++        => Ok(await _circulation.GetLoansAsync(request, request.MemberId, request.BookCopyId, request.Status, request.IsOverdue, ct));
+ 
+-    /// <summary>
+-    /// Issue a new loan
+-    /// </summary>
+-    [HttpPost("loans")]
+-    [ProducesResponseType(typeof(LoanDto), StatusCodes.Status201Created)]
+-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+-    public async Task<ActionResult<LoanDto>> IssueLoan([FromBody] IssueLoanRequestDto request)
+-    {
+-        try
+-        {
+-            var loan = await _circulationService.IssueLoanAsync(request);
+-            return CreatedAtAction(nameof(GetLoan), new { id = loan.Id }, loan);
+-        }
+-        catch (InvalidOperationException ex)
+-        {
+-            return BadRequest(new { message = ex.Message });
+-        }
+-    }
++    [HttpGet("loans/overdue")]
++    public async Task<ActionResult<IEnumerable<LoanDto>>> GetOverdueLoans(CancellationToken ct)
++        => Ok(await _circulation.GetOverdueLoansAsync(ct));
+ 
+-    /// <summary>
+-    /// Return a loan
+-    /// </summary>
+-    [HttpPost("loans/{id:guid}/return")]
+-    [ProducesResponseType(typeof(LoanDto), StatusCodes.Status200OK)]
+-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+-    [ProducesResponseType(StatusCodes.Status404NotFound)]
+-    public async Task<ActionResult<LoanDto>> ReturnLoan(Guid id, [FromBody] ReturnLoanRequestDto request)
++    [HttpGet("loans/{id:guid}")]
++    public async Task<ActionResult<LoanDto>> GetLoanById(Guid id, CancellationToken ct)
+     {
+-        try
+-        {
+-            var loan = await _circulationService.ReturnLoanAsync(id, request);
+-            if (loan == null)
+-            {
+-                return NotFound(new { message = "Loan not found" });
+-            }
+-            return Ok(loan);
+-        }
+-        catch (InvalidOperationException ex)
+-        {
+-            return BadRequest(new { message = ex.Message });
+-        }
++        var loan = await _circulation.GetLoanByIdAsync(id, ct);
++        return loan == null ? NotFound() : Ok(loan);
+     }
+ 
+-    /// <summary>
+-    /// Renew a loan
+-    /// </summary>
+-    [HttpPost("loans/{id:guid}/renew")]
+-    [ProducesResponseType(typeof(LoanDto), StatusCodes.Status200OK)]
+-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+-    [ProducesResponseType(StatusCodes.Status404NotFound)]
+-    public async Task<ActionResult<LoanDto>> RenewLoan(Guid id, [FromBody] RenewLoanRequestDto request)
++    [HttpPost("loans/issue")]
++    public async Task<ActionResult<LoanDto>> IssueBook([FromBody] CreateLoanRequest request, CancellationToken ct)
+     {
+-        try
+-        {
+-            var loan = await _circulationService.RenewLoanAsync(id, request);
+-            if (loan == null)
+-            {
+-                return NotFound(new { message = "Loan not found" });
+-            }
+-            return Ok(loan);
+-        }
+-        catch (InvalidOperationException ex)
+-        {
+-            return BadRequest(new { message = ex.Message });
+-        }
++        if (CurrentUserId is not Guid userId) return Unauthorized();
++        var loan = await _circulation.IssueBookAsync(request, userId, ct);
++        return CreatedAtAction(nameof(GetLoanById), new { id = loan.Id }, loan);
+     }
+ 
+-    /// <summary>
+-    /// Get overdue loans
+-    /// </summary>
+-    [HttpGet("loans/overdue")]
+-    [ProducesResponseType(typeof(IEnumerable<LoanDto>), StatusCodes.Status200OK)]
+-    public async Task<ActionResult<IEnumerable<LoanDto>>> GetOverdueLoans()
++    [HttpPost("loans/renew")]
++    public async Task<ActionResult<LoanDto>> RenewLoan([FromBody] RenewLoanRequest request, CancellationToken ct)
+     {
+-        var loans = await _circulationService.GetOverdueLoansAsync();
+-        return Ok(loans);
++        if (CurrentUserId is not Guid userId) return Unauthorized();
++        var loan = await _circulation.RenewLoanAsync(request, userId, ct);
++        return loan == null ? NotFound() : Ok(loan);
+     }
+ 
+-    /// <summary>
+-    /// Process overdue fines (background job trigger)
+-    /// </summary>
+-    [HttpPost("loans/process-overdue-fines")]
+-    [Authorize(Policy = "AdminOnly")]
+-    [ProducesResponseType(StatusCodes.Status200OK)]
+-    public async Task<IActionResult> ProcessOverdueFines()
++    [HttpPost("loans/return")]
++    public async Task<ActionResult<LoanDto>> ReturnBook([FromBody] ReturnLoanRequest request, CancellationToken ct)
+     {
+-        await _circulationService.ProcessOverdueFinesAsync();
+-        return Ok(new { message = "Overdue fines processed successfully" });
++        if (CurrentUserId is not Guid userId) return Unauthorized();
++        var loan = await _circulation.ReturnBookAsync(request, userId, ct);
++        return loan == null ? NotFound() : Ok(loan);
+     }
+ 
+-    /// <summary>
+-    /// Process expired reservations (background job trigger)
+-    /// </summary>
+-    [HttpPost("loans/process-expired-reservations")]
++    [HttpPost("loans/process-overdue")]
+     [Authorize(Policy = "AdminOnly")]
+-    [ProducesResponseType(StatusCodes.Status200OK)]
+-    public async Task<IActionResult> ProcessExpiredReservations()
++    public async Task<IActionResult> ProcessOverdueLoans(CancellationToken ct)
+     {
+-        await _circulationService.ProcessExpiredReservationsAsync();
+-        return Ok(new { message = "Expired reservations processed successfully" });
++        await _circulation.ProcessOverdueLoansAsync(ct);
++        return Ok(new { message = "Overdue loans processed" });
+     }
+ 
+-    #endregion
++    // ---------- Reservations ----------
+ 
+-    #region Reservations
+-
+-    /// <summary>
+-    /// Get all reservations with pagination and filters
+-    /// </summary>
+     [HttpGet("reservations")]
+-    [ProducesResponseType(typeof(PagedResultDto<ReservationDto>), StatusCodes.Status200OK)]
+-    public async Task<ActionResult<PagedResultDto<ReservationDto>>> GetReservations(
+-        [FromQuery] int page = 1,
+-        [FromQuery] int pageSize = 10,
+-        [FromQuery] string? search = null,
+-        [FromQuery] Guid? memberId = null,
+-        [FromQuery] Guid? bookId = null,
+-        [FromQuery] string? status = null)
+-    {
+-        var result = await _circulationService.GetReservationsAsync(page, pageSize, search, memberId, bookId, status);
+-        return Ok(result);
+-    }
++    public async Task<ActionResult<PaginatedResult<ReservationDto>>> GetReservations([FromQuery] PaginationRequest request, [FromQuery] Guid? memberId, [FromQuery] Guid? bookId, [FromQuery] ReservationStatus? status, CancellationToken ct)
++        => Ok(await _circulation.GetReservationsAsync(request, memberId, bookId, status, ct));
+ 
+-    /// <summary>
+-    /// Get reservation by ID
+-    /// </summary>
+     [HttpGet("reservations/{id:guid}")]
+-    [ProducesResponseType(typeof(ReservationDto), StatusCodes.Status200OK)]
+-    [ProducesResponseType(StatusCodes.Status404NotFound)]
+-    public async Task<ActionResult<ReservationDto>> GetReservation(Guid id)
++    public async Task<ActionResult<ReservationDto>> GetReservationById(Guid id, CancellationToken ct)
+     {
+-        var reservation = await _circulationService.GetReservationByIdAsync(id);
+-        if (reservation == null)
+-        {
+-            return NotFound(new { message = "Reservation not found" });
+-        }
+-        return Ok(reservation);
++        var r = await _circulation.GetReservationByIdAsync(id, ct);
++        return r == null ? NotFound() : Ok(r);
+     }
+ 
+-    /// <summary>
+-    /// Create a new reservation
+-    /// </summary>
+     [HttpPost("reservations")]
+-    [ProducesResponseType(typeof(ReservationDto), StatusCodes.Status201Created)]
+-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+-    public async Task<ActionResult<ReservationDto>> CreateReservation([FromBody] CreateReservationRequestDto request)
++    public async Task<ActionResult<ReservationDto>> CreateReservation([FromBody] CreateReservationRequest request, CancellationToken ct)
+     {
+-        try
+-        {
+-            var reservation = await _circulationService.CreateReservationAsync(request);
+-            return CreatedAtAction(nameof(GetReservation), new { id = reservation.Id }, reservation);
+-        }
+-        catch (InvalidOperationException ex)
+-        {
+-            return BadRequest(new { message = ex.Message });
+-        }
++        var r = await _circulation.CreateReservationAsync(request, ct);
++        return CreatedAtAction(nameof(GetReservationById), new { id = r.Id }, r);
+     }
+ 
+-    /// <summary>
+-    /// Cancel a reservation
+-    /// </summary>
+-    [HttpPost("reservations/{id:guid}/cancel")]
+-    [ProducesResponseType(typeof(ReservationDto), StatusCodes.Status200OK)]
+-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+-    [ProducesResponseType(StatusCodes.Status404NotFound)]
+-    public async Task<ActionResult<ReservationDto>> CancelReservation(Guid id)
+-    {
+-        var reservation = await _circulationService.CancelReservationAsync(id);
+-        if (reservation == null)
+-        {
+-            return NotFound(new { message = "Reservation not found" });
+-        }
+-        return Ok(reservation);
+-    }
++    [HttpPost("reservations/cancel")]
++    public async Task<IActionResult> CancelReservation([FromBody] CancelReservationRequest request, CancellationToken ct)
++        => await _circulation.CancelReservationAsync(request, ct) ? Ok() : NotFound();
+ 
+-    /// <summary>
+-    /// Fulfill a reservation (when book becomes available)
+-    /// </summary>
+-    [HttpPost("reservations/{id:guid}/fulfill")]
+-    [ProducesResponseType(typeof(ReservationDto), StatusCodes.Status200OK)]
+-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+-    [ProducesResponseType(StatusCodes.Status404NotFound)]
+-    public async Task<ActionResult<ReservationDto>> FulfillReservation(Guid id)
++    [HttpPost("reservations/process-expired")]
++    [Authorize(Policy = "AdminOnly")]
++    public async Task<IActionResult> ProcessExpiredReservations(CancellationToken ct)
+     {
+-        var reservation = await _circulationService.FulfillReservationAsync(id);
+-        if (reservation == null)
+-        {
+-            return NotFound(new { message = "Reservation not found" });
+-        }
+-        return Ok(reservation);
++        await _circulation.ProcessExpiredReservationsAsync(ct);
++        return Ok(new { message = "Expired reservations processed" });
+     }
+ 
+-    #endregion
++    // ---------- Fines ----------
+ 
+-    #region Fines
+-
+-    /// <summary>
+-    /// Get all fines with pagination and filters
+-    /// </summary>
+     [HttpGet("fines")]
+-    [ProducesResponseType(typeof(PagedResultDto<FineDto>), StatusCodes.Status200OK)]
+-    public async Task<ActionResult<PagedResultDto<FineDto>>> GetFines(
+-        [FromQuery] int page = 1,
+-        [FromQuery] int pageSize = 10,
+-        [FromQuery] Guid? memberId = null,
+-        [FromQuery] string? status = null)
+-    {
+-        var result = await _circulationService.GetFinesAsync(page, pageSize, memberId, status);
+-        return Ok(result);
+-    }
++    public async Task<ActionResult<PaginatedResult<FineDto>>> GetFines([FromQuery] FinePaginationRequest request, CancellationToken ct)
++        => Ok(await _circulation.GetFinesAsync(request, request.MemberId, request.Status, ct));
+ 
+-    /// <summary>
+-    /// Get fine by ID
+-    /// </summary>
+     [HttpGet("fines/{id:guid}")]
+-    [ProducesResponseType(typeof(FineDto), StatusCodes.Status200OK)]
+-    [ProducesResponseType(StatusCodes.Status404NotFound)]
+-    public async Task<ActionResult<FineDto>> GetFine(Guid id)
++    public async Task<ActionResult<FineDto>> GetFineById(Guid id, CancellationToken ct)
+     {
+-        var fine = await _circulationService.GetFineByIdAsync(id);
+-        if (fine == null)
+-        {
+-            return NotFound(new { message = "Fine not found" });
+-        }
+-        return Ok(fine);
++        var fine = await _circulation.GetFineByIdAsync(id, ct);
++        return fine == null ? NotFound() : Ok(fine);
+     }
+ 
+-    /// <summary>
+-    /// Pay a fine
+-    /// </summary>
+-    [HttpPost("fines/{id:guid}/pay")]
+-    [ProducesResponseType(typeof(FineDto), StatusCodes.Status200OK)]
+-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+-    [ProducesResponseType(StatusCodes.Status404NotFound)]
+-    public async Task<ActionResult<FineDto>> PayFine(Guid id, [FromBody] PayFineRequestDto request)
++    [HttpPost("fines")]
++    public async Task<ActionResult<FineDto>> CreateFine([FromBody] CreateFineRequest request, CancellationToken ct)
+     {
+-        try
+-        {
+-            var fine = await _circulationService.PayFineAsync(id, request);
+-            if (fine == null)
+-            {
+-                return NotFound(new { message = "Fine not found" });
+-            }
+-            return Ok(fine);
+-        }
+-        catch (InvalidOperationException ex)
+-        {
+-            return BadRequest(new { message = ex.Message });
+-        }
++        var fine = await _circulation.CreateFineAsync(request, ct);
++        return CreatedAtAction(nameof(GetFineById), new { id = fine.Id }, fine);
+     }
+ 
+-    /// <summary>
+-    /// Waive a fine (Admin only)
+-    /// </summary>
+-    [HttpPost("fines/{id:guid}/waive")]
++    /// <summary>Waive or otherwise change fine status (Admin only).</summary>
++    [HttpPatch("fines/{id:guid}/status")]
+     [Authorize(Policy = "AdminOnly")]
+-    [ProducesResponseType(typeof(FineDto), StatusCodes.Status200OK)]
+-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+-    [ProducesResponseType(StatusCodes.Status404NotFound)]
+-    public async Task<ActionResult<FineDto>> WaiveFine(Guid id, [FromBody] WaiveFineRequestDto request)
++    public async Task<ActionResult<FineDto>> UpdateFineStatus(Guid id, [FromQuery] FineStatus status, CancellationToken ct)
+     {
+-        try
+-        {
+-            var fine = await _circulationService.WaiveFineAsync(id, request);
+-            if (fine == null)
+-            {
+-                return NotFound(new { message = "Fine not found" });
+-            }
+-            return Ok(fine);
+-        }
+-        catch (InvalidOperationException ex)
+-        {
+-            return BadRequest(new { message = ex.Message });
+-        }
++        var fine = await _circulation.UpdateFineStatusAsync(id, status, ct);
++        return fine == null ? NotFound() : Ok(fine);
+     }
+ 
+-    /// <summary>
+-    /// Get member fines summary
+-    /// </summary>
+-    [HttpGet("fines/member/{memberId:guid}/summary")]
+-    [ProducesResponseType(typeof(MemberFinesSummaryDto), StatusCodes.Status200OK)]
+-    [ProducesResponseType(StatusCodes.Status404NotFound)]
+-    public async Task<ActionResult<MemberFinesSummaryDto>> GetMemberFinesSummary(Guid memberId)
++    // ---------- Payments ----------
++
++    [HttpGet("payments")]
++    public async Task<ActionResult<PaginatedResult<PaymentDto>>> GetPayments([FromQuery] PaginationRequest request, [FromQuery] Guid? fineId, [FromQuery] DateTime? fromDate, [FromQuery] DateTime? toDate, CancellationToken ct)
++        => Ok(await _circulation.GetPaymentsAsync(request, fineId, fromDate, toDate, ct));
++
++    [HttpPost("payments")]
++    public async Task<ActionResult<PaymentDto>> RecordPayment([FromBody] CreatePaymentRequest request, CancellationToken ct)
+     {
+-        var summary = await _circulationService.GetMemberFinesSummaryAsync(memberId);
+-        if (summary == null)
+-        {
+-            return NotFound(new { message = "Member not found" });
+-        }
+-        return Ok(summary);
++        if (CurrentUserId is not Guid userId) return Unauthorized();
++        var payment = await _circulation.RecordPaymentAsync(request, userId, ct);
++        return Ok(payment);
+     }
+-
+-    #endregion
+-}
+\ No newline at end of file
++}
+diff --git a/src/LMS.API/Controllers/MemberController.cs b/src/LMS.API/Controllers/MemberController.cs
+index 62b4b6e..50e36b5 100644
+--- a/src/LMS.API/Controllers/MemberController.cs
++++ b/src/LMS.API/Controllers/MemberController.cs
+@@ -1,210 +1,94 @@
+-using LMS.Application.DTOs.Member;
++using LMS.Application.DTOs;
+ using LMS.Application.Interfaces;
+ using Microsoft.AspNetCore.Authorization;
+ using Microsoft.AspNetCore.Mvc;
+ 
+ namespace LMS.API.Controllers;
+ 
+-[ApiController]
+-[Route("api/[controller]")]
+ [Authorize(Policy = "LibrarianOrAdmin")]
+-[Produces("application/json")]
+-public class MemberController : ControllerBase
++public class MemberController : ApiControllerBase
+ {
+-    private readonly IMemberService _memberService;
+-    private readonly ILogger<MemberController> _logger;
++    private readonly IMemberService _members;
+ 
+-    public MemberController(IMemberService memberService, ILogger<MemberController> logger)
++    public MemberController(IMemberService members)
+     {
+-        _memberService = memberService;
+-        _logger = logger;
++        _members = members;
+     }
+ 
+-    /// <summary>
+-    /// Get all members with pagination and search
+-    /// </summary>
++    // ---------- Members ----------
++
+     [HttpGet]
+-    [ProducesResponseType(typeof(PagedResultDto<MemberDto>), StatusCodes.Status200OK)]
+-    public async Task<ActionResult<PagedResultDto<MemberDto>>> GetMembers(
+-        [FromQuery] int page = 1,
+-        [FromQuery] int pageSize = 10,
+-        [FromQuery] string? search = null,
+-        [FromQuery] bool? isActive = null,
+-        [FromQuery] Guid? memberTypeId = null)
+-    {
+-        var result = await _memberService.GetMembersAsync(page, pageSize, search, isActive, memberTypeId);
+-        return Ok(result);
+-    }
++    public async Task<ActionResult<PaginatedResult<MemberDto>>> GetAll([FromQuery] MemberPaginationRequest request, [FromQuery] string? search, CancellationToken ct)
++        => Ok(await _members.GetAllAsync(request, request.IsActive, request.MemberTypeId, search, ct));
+ 
+-    /// <summary>
+-    /// Get member by ID
+-    /// </summary>
+     [HttpGet("{id:guid}")]
+-    [ProducesResponseType(typeof(MemberDto), StatusCodes.Status200OK)]
+-    [ProducesResponseType(StatusCodes.Status404NotFound)]
+-    public async Task<ActionResult<MemberDto>> GetMember(Guid id)
++    public async Task<ActionResult<MemberDto>> GetById(Guid id, CancellationToken ct)
+     {
+-        var member = await _memberService.GetMemberByIdAsync(id);
+-        if (member == null)
+-        {
+-            return NotFound(new { message = "Member not found" });
+-        }
+-        return Ok(member);
++        var member = await _members.GetByIdAsync(id, ct);
++        return member == null ? NotFound() : Ok(member);
+     }
+ 
+-    /// <summary>
+-    /// Get member by user ID
+-    /// </summary>
+-    [HttpGet("user/{userId:guid}")]
+-    [ProducesResponseType(typeof(MemberDto), StatusCodes.Status200OK)]
+-    [ProducesResponseType(StatusCodes.Status404NotFound)]
+-    public async Task<ActionResult<MemberDto>> GetMemberByUserId(Guid userId)
++    [HttpGet("by-number/{memberNumber}")]
++    public async Task<ActionResult<MemberDto>> GetByNumber(string memberNumber, CancellationToken ct)
+     {
+-        var member = await _memberService.GetMemberByUserIdAsync(userId);
+-        if (member == null)
+-        {
+-            return NotFound(new { message = "Member not found" });
+-        }
+-        return Ok(member);
++        var member = await _members.GetByMemberNumberAsync(memberNumber, ct);
++        return member == null ? NotFound() : Ok(member);
+     }
+ 
+-    /// <summary>
+-    /// Create a new member
+-    /// </summary>
+     [HttpPost]
+-    [ProducesResponseType(typeof(MemberDto), StatusCodes.Status201Created)]
+-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+-    [ProducesResponseType(StatusCodes.Status409Conflict)]
+-    public async Task<ActionResult<MemberDto>> CreateMember([FromBody] CreateMemberRequestDto request)
++    public async Task<ActionResult<MemberDto>> Create([FromBody] CreateMemberRequest request, CancellationToken ct)
+     {
+-        try
+-        {
+-            var member = await _memberService.CreateMemberAsync(request);
+-            return CreatedAtAction(nameof(GetMember), new { id = member.Id }, member);
+-        }
+-        catch (InvalidOperationException ex)
+-        {
+-            return Conflict(new { message = ex.Message });
+-        }
++        var member = await _members.CreateAsync(request, ct);
++        return CreatedAtAction(nameof(GetById), new { id = member.Id }, member);
+     }
+ 
+-    /// <summary>
+-    /// Update member
+-    /// </summary>
+     [HttpPut("{id:guid}")]
+-    [ProducesResponseType(typeof(MemberDto), StatusCodes.Status200OK)]
+-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+-    [ProducesResponseType(StatusCodes.Status404NotFound)]
+-    public async Task<ActionResult<MemberDto>> UpdateMember(Guid id, [FromBody] UpdateMemberRequestDto request)
++    public async Task<ActionResult<MemberDto>> Update(Guid id, [FromBody] UpdateMemberRequest request, CancellationToken ct)
+     {
+-        var member = await _memberService.UpdateMemberAsync(id, request);
+-        if (member == null)
+-        {
+-            return NotFound(new { message = "Member not found" });
+-        }
+-        return Ok(member);
++        var member = await _members.UpdateAsync(id, request, ct);
++        return member == null ? NotFound() : Ok(member);
+     }
+ 
+-    /// <summary>
+-    /// Delete member (soft delete)
+-    /// </summary>
+     [HttpDelete("{id:guid}")]
+-    [ProducesResponseType(StatusCodes.Status204NoContent)]
+-    [ProducesResponseType(StatusCodes.Status404NotFound)]
+-    public async Task<IActionResult> DeleteMember(Guid id)
+-    {
+-        var result = await _memberService.DeleteMemberAsync(id);
+-        if (!result)
+-        {
+-            return NotFound(new { message = "Member not found" });
+-        }
+-        return NoContent();
+-    }
++    [Authorize(Policy = "AdminOnly")]
++    public async Task<IActionResult> Delete(Guid id, CancellationToken ct)
++        => await _members.DeleteAsync(id, ct) ? NoContent() : NotFound();
+ 
+-    /// <summary>
+-    /// Renew member membership
+-    /// </summary>
+-    [HttpPost("{id:guid}/renew")]
+-    [ProducesResponseType(typeof(MemberDto), StatusCodes.Status200OK)]
+-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+-    [ProducesResponseType(StatusCodes.Status404NotFound)]
+-    public async Task<ActionResult<MemberDto>> RenewMembership(Guid id, [FromBody] RenewMembershipRequestDto request)
+-    {
+-        var member = await _memberService.RenewMembershipAsync(id, request);
+-        if (member == null)
+-        {
+-            return NotFound(new { message = "Member not found" });
+-        }
+-        return Ok(member);
+-    }
++    [HttpPatch("{id:guid}/toggle-active")]
++    public async Task<IActionResult> ToggleActive(Guid id, CancellationToken ct)
++        => await _members.ToggleActiveAsync(id, ct) ? Ok() : NotFound();
+ 
+-    /// <summary>
+-    /// Get expiring members
+-    /// </summary>
+-    [HttpGet("expiring")]
+-    [ProducesResponseType(typeof(IEnumerable<MemberDto>), StatusCodes.Status200OK)]
+-    public async Task<ActionResult<IEnumerable<MemberDto>>> GetExpiringMembers([FromQuery] int days = 30)
+-    {
+-        var members = await _memberService.GetExpiringMembersAsync(days);
+-        return Ok(members);
+-    }
++    // ---------- Member types ----------
+ 
+-    /// <summary>
+-    /// Get member types
+-    /// </summary>
+     [HttpGet("types")]
+-    [ProducesResponseType(typeof(IEnumerable<MemberTypeDto>), StatusCodes.Status200OK)]
+-    public async Task<ActionResult<IEnumerable<MemberTypeDto>>> GetMemberTypes()
++    public async Task<ActionResult<PaginatedResult<MemberTypeDto>>> GetTypes([FromQuery] PaginationRequest request, CancellationToken ct)
++        => Ok(await _members.GetMemberTypesAsync(request, ct));
++
++    [HttpGet("types/{id:guid}")]
++    public async Task<ActionResult<MemberTypeDto>> GetTypeById(Guid id, CancellationToken ct)
+     {
+-        var types = await _memberService.GetMemberTypesAsync();
+-        return Ok(types);
++        var type = await _members.GetMemberTypeByIdAsync(id, ct);
++        return type == null ? NotFound() : Ok(type);
+     }
+ 
+-    /// <summary>
+-    /// Create member type
+-    /// </summary>
+     [HttpPost("types")]
+     [Authorize(Policy = "AdminOnly")]
+-    [ProducesResponseType(typeof(MemberTypeDto), StatusCodes.Status201Created)]
+-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+-    public async Task<ActionResult<MemberTypeDto>> CreateMemberType([FromBody] CreateMemberTypeRequestDto request)
++    public async Task<ActionResult<MemberTypeDto>> CreateType([FromBody] CreateMemberTypeRequest request, CancellationToken ct)
+     {
+-        var type = await _memberService.CreateMemberTypeAsync(request);
+-        return CreatedAtAction(nameof(GetMemberTypes), new { }, type);
++        var type = await _members.CreateMemberTypeAsync(request, ct);
++        return CreatedAtAction(nameof(GetTypeById), new { id = type.Id }, type);
+     }
+ 
+-    /// <summary>
+-    /// Update member type
+-    /// </summary>
+     [HttpPut("types/{id:guid}")]
+     [Authorize(Policy = "AdminOnly")]
+-    [ProducesResponseType(typeof(MemberTypeDto), StatusCodes.Status200OK)]
+-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+-    [ProducesResponseType(StatusCodes.Status404NotFound)]
+-    public async Task<ActionResult<MemberTypeDto>> UpdateMemberType(Guid id, [FromBody] UpdateMemberTypeRequestDto request)
++    public async Task<ActionResult<MemberTypeDto>> UpdateType(Guid id, [FromBody] UpdateMemberTypeRequest request, CancellationToken ct)
+     {
+-        var type = await _memberService.UpdateMemberTypeAsync(id, request);
+-        if (type == null)
+-        {
+-            return NotFound(new { message = "Member type not found" });
+-        }
+-        return Ok(type);
++        var type = await _members.UpdateMemberTypeAsync(id, request, ct);
++        return type == null ? NotFound() : Ok(type);
+     }
+ 
+-    /// <summary>
+-    /// Delete member type
+-    /// </summary>
+     [HttpDelete("types/{id:guid}")]
+     [Authorize(Policy = "AdminOnly")]
+-    [ProducesResponseType(StatusCodes.Status204NoContent)]
+-    [ProducesResponseType(StatusCodes.Status404NotFound)]
+-    public async Task<IActionResult> DeleteMemberType(Guid id)
+-    {
+-        var result = await _memberService.DeleteMemberTypeAsync(id);
+-        if (!result)
+-        {
+-            return NotFound(new { message = "Member type not found" });
+-        }
+-        return NoContent();
+-    }
+-}
+\ No newline at end of file
++    public async Task<IActionResult> DeleteType(Guid id, CancellationToken ct)
++        => await _members.DeleteMemberTypeAsync(id, ct) ? NoContent() : NotFound();
++}
+diff --git a/src/LMS.API/Controllers/NotificationController.cs b/src/LMS.API/Controllers/NotificationController.cs
+index a769c74..ef09178 100644
+--- a/src/LMS.API/Controllers/NotificationController.cs
++++ b/src/LMS.API/Controllers/NotificationController.cs
+@@ -1,193 +1,99 @@
+-using LMS.Application.DTOs.Notification;
++using LMS.Application.DTOs;
+ using LMS.Application.Interfaces;
+ using Microsoft.AspNetCore.Authorization;
+ using Microsoft.AspNetCore.Mvc;
+ 
+ namespace LMS.API.Controllers;
+ 
+-[ApiController]
+-[Route("api/[controller]")]
+ [Authorize]
+-[Produces("application/json")]
+-public class NotificationController : ControllerBase
++public class NotificationController : ApiControllerBase
+ {
+-    private readonly INotificationService _notificationService;
+-    private readonly ILogger<NotificationController> _logger;
++    private readonly INotificationService _notifications;
+ 
+-    public NotificationController(INotificationService notificationService, ILogger<NotificationController> logger)
++    public NotificationController(INotificationService notifications)
+     {
+-        _notificationService = notificationService;
+-        _logger = logger;
++        _notifications = notifications;
+     }
+ 
+-    /// <summary>
+-    /// Get all notifications for current user with pagination
+-    /// </summary>
+-    [HttpGet]
+-    [ProducesResponseType(typeof(PagedResultDto<NotificationDto>), StatusCodes.Status200OK)]
+-    public async Task<ActionResult<PagedResultDto<NotificationDto>>> GetNotifications(
+-        [FromQuery] int page = 1,
+-        [FromQuery] int pageSize = 10,
+-        [FromQuery] bool? isRead = null)
++    /// <summary>Notifications of the logged-in user.</summary>
++    [HttpGet("my")]
++    public async Task<ActionResult<PaginatedResult<NotificationDto>>> My([FromQuery] NotificationPaginationRequest request, CancellationToken ct)
+     {
+-        var userId = GetCurrentUserId();
+-        var result = await _notificationService.GetUserNotificationsAsync(userId, page, pageSize, isRead);
+-        return Ok(result);
++        if (CurrentUserId is not Guid userId) return Unauthorized();
++        return Ok(await _notifications.GetNotificationsAsync(request, userId, request.IsRead, ct));
+     }
+ 
+-    /// <summary>
+-    /// Get notification by ID
+-    /// </summary>
+-    [HttpGet("{id:guid}")]
+-    [ProducesResponseType(typeof(NotificationDto), StatusCodes.Status200OK)]
+-    [ProducesResponseType(StatusCodes.Status404NotFound)]
+-    public async Task<ActionResult<NotificationDto>> GetNotification(Guid id)
++    [HttpGet("unread-count")]
++    public async Task<ActionResult<int>> UnreadCount(CancellationToken ct)
+     {
+-        var notification = await _notificationService.GetNotificationByIdAsync(id);
+-        if (notification == null)
+-        {
+-            return NotFound(new { message = "Notification not found" });
+-        }
+-        return Ok(notification);
++        if (CurrentUserId is not Guid userId) return Unauthorized();
++        return Ok(await _notifications.GetUnreadCountAsync(userId, ct));
+     }
+ 
+-    /// <summary>
+-    /// Mark notification as read
+-    /// </summary>
+-    [HttpPost("{id:guid}/read")]
+-    [ProducesResponseType(typeof(NotificationDto), StatusCodes.Status200OK)]
+-    [ProducesResponseType(StatusCodes.Status404NotFound)]
+-    public async Task<ActionResult<NotificationDto>> MarkAsRead(Guid id)
+-    {
+-        var notification = await _notificationService.MarkAsReadAsync(id);
+-        if (notification == null)
+-        {
+-            return NotFound(new { message = "Notification not found" });
+-        }
+-        return Ok(notification);
+-    }
++    [HttpPost("mark-read")]
++    public async Task<IActionResult> MarkRead([FromBody] MarkAsReadRequest request, CancellationToken ct)
++        => await _notifications.MarkAsReadAsync(request, ct) ? Ok() : NotFound();
+ 
+-    /// <summary>
+-    /// Mark all notifications as read for current user
+-    /// </summary>
+-    [HttpPost("read-all")]
+-    [ProducesResponseType(StatusCodes.Status200OK)]
+-    public async Task<IActionResult> MarkAllAsRead()
++    [HttpPost("mark-all-read")]
++    public async Task<IActionResult> MarkAllRead(CancellationToken ct)
+     {
+-        var userId = GetCurrentUserId();
+-        await _notificationService.MarkAllAsReadAsync(userId);
+-        return Ok(new { message = "All notifications marked as read" });
++        if (CurrentUserId is not Guid userId) return Unauthorized();
++        await _notifications.MarkAllAsReadAsync(userId, ct);
++        return Ok();
+     }
+ 
+-    /// <summary>
+-    /// Get unread notification count for current user
+-    /// </summary>
+-    [HttpGet("unread-count")]
+-    [ProducesResponseType(typeof(int), StatusCodes.Status200OK)]
+-    public async Task<ActionResult<int>> GetUnreadCount()
+-    {
+-        var userId = GetCurrentUserId();
+-        var count = await _notificationService.GetUnreadCountAsync(userId);
+-        return Ok(count);
+-    }
++    // ---------- Staff ----------
+ 
+-    /// <summary>
+-    /// Send notification to specific user (Admin/Librarian only)
+-    /// </summary>
+-    [HttpPost("send")]
++    [HttpGet]
+     [Authorize(Policy = "LibrarianOrAdmin")]
+-    [ProducesResponseType(typeof(NotificationDto), StatusCodes.Status201Created)]
+-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+-    public async Task<ActionResult<NotificationDto>> SendNotification([FromBody] SendNotificationRequestDto request)
+-    {
+-        var notification = await _notificationService.SendNotificationAsync(request);
+-        return CreatedAtAction(nameof(GetNotification), new { id = notification.Id }, notification);
+-    }
++    public async Task<ActionResult<PaginatedResult<NotificationDto>>> GetAll([FromQuery] NotificationPaginationRequest request, [FromQuery] Guid? userId, CancellationToken ct)
++        => Ok(await _notifications.GetNotificationsAsync(request, userId, request.IsRead, ct));
+ 
+-    /// <summary>
+-    /// Send bulk notification to multiple users (Admin only)
+-    /// </summary>
+-    [HttpPost("send-bulk")]
+-    [Authorize(Policy = "AdminOnly")]
+-    [ProducesResponseType(typeof(IEnumerable<NotificationDto>), StatusCodes.Status201Created)]
+-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+-    public async Task<ActionResult<IEnumerable<NotificationDto>>> SendBulkNotification([FromBody] SendBulkNotificationRequestDto request)
++    [HttpGet("{id:guid}")]
++    [Authorize(Policy = "LibrarianOrAdmin")]
++    public async Task<ActionResult<NotificationDto>> GetById(Guid id, CancellationToken ct)
+     {
+-        var notifications = await _notificationService.SendBulkNotificationAsync(request);
+-        return CreatedAtAction(nameof(GetNotifications), new { }, notifications);
++        var n = await _notifications.GetByIdAsync(id, ct);
++        return n == null ? NotFound() : Ok(n);
+     }
+ 
+-    /// <summary>
+-    /// Delete notification
+-    /// </summary>
+-    [HttpDelete("{id:guid}")]
+-    [ProducesResponseType(StatusCodes.Status204NoContent)]
+-    [ProducesResponseType(StatusCodes.Status404NotFound)]
+-    public async Task<IActionResult> DeleteNotification(Guid id)
++    [HttpPost]
++    [Authorize(Policy = "LibrarianOrAdmin")]
++    public async Task<ActionResult<NotificationDto>> Create([FromBody] CreateNotificationRequest request, CancellationToken ct)
+     {
+-        var result = await _notificationService.DeleteNotificationAsync(id);
+-        if (!result)
+-        {
+-            return NotFound(new { message = "Notification not found" });
+-        }
+-        return NoContent();
++        var n = await _notifications.CreateAsync(request, ct);
++        return CreatedAtAction(nameof(GetById), new { id = n.Id }, n);
+     }
+ 
+-    /// <summary>
+-    /// Trigger overdue notifications (Admin only)
+-    /// </summary>
+-    [HttpPost("trigger-overdue")]
++    [HttpPost("send/overdue/{loanId:guid}")]
+     [Authorize(Policy = "AdminOnly")]
+-    [ProducesResponseType(StatusCodes.Status200OK)]
+-    public async Task<IActionResult> TriggerOverdueNotifications()
++    public async Task<IActionResult> SendOverdue(Guid loanId, CancellationToken ct)
+     {
+-        await _notificationService.SendOverdueNotificationsAsync();
+-        return Ok(new { message = "Overdue notifications triggered" });
++        await _notifications.SendOverdueNotificationAsync(loanId, ct);
++        return Accepted();
+     }
+ 
+-    /// <summary>
+-    /// Trigger reservation ready notifications (Admin only)
+-    /// </summary>
+-    [HttpPost("trigger-reservation-ready")]
++    [HttpPost("send/due-reminder/{loanId:guid}")]
+     [Authorize(Policy = "AdminOnly")]
+-    [ProducesResponseType(StatusCodes.Status200OK)]
+-    public async Task<IActionResult> TriggerReservationReadyNotifications()
++    public async Task<IActionResult> SendDueReminder(Guid loanId, CancellationToken ct)
+     {
+-        await _notificationService.SendReservationReadyNotificationsAsync();
+-        return Ok(new { message = "Reservation ready notifications triggered" });
++        await _notifications.SendDueDateReminderAsync(loanId, ct);
++        return Accepted();
+     }
+ 
+-    /// <summary>
+-    /// Trigger fine notifications (Admin only)
+-    /// </summary>
+-    [HttpPost("trigger-fines")]
++    [HttpPost("send/fine/{fineId:guid}")]
+     [Authorize(Policy = "AdminOnly")]
+-    [ProducesResponseType(StatusCodes.Status200OK)]
+-    public async Task<IActionResult> TriggerFineNotifications()
++    public async Task<IActionResult> SendFine(Guid fineId, CancellationToken ct)
+     {
+-        await _notificationService.SendFineNotificationsAsync();
+-        return Ok(new { message = "Fine notifications triggered" });
++        await _notifications.SendFineNotificationAsync(fineId, ct);
++        return Accepted();
+     }
+ 
+-    /// <summary>
+-    /// Trigger due date reminders (Admin only)
+-    /// </summary>
+-    [HttpPost("trigger-due-date-reminders")]
++    [HttpPost("send/reservation-ready/{reservationId:guid}")]
+     [Authorize(Policy = "AdminOnly")]
+-    [ProducesResponseType(StatusCodes.Status200OK)]
+-    public async Task<IActionResult> TriggerDueDateReminders()
+-    {
+-        await _notificationService.SendDueDateRemindersAsync();
+-        return Ok(new { message = "Due date reminders triggered" });
+-    }
+-
+-    private Guid GetCurrentUserId()
++    public async Task<IActionResult> SendReservationReady(Guid reservationId, CancellationToken ct)
+     {
+-        var userIdClaim = User.FindFirst("sub")?.Value ?? User.FindFirst("userId")?.Value;
+-        if (string.IsNullOrEmpty(userIdClaim) || !Guid.TryParse(userIdClaim, out var userId))
+-        {
+-            throw new UnauthorizedAccessException("Invalid user token");
+-        }
+-        return userId;
++        await _notifications.SendReservationReadyNotificationAsync(reservationId, ct);
++        return Accepted();
+     }
+-}
+\ No newline at end of file
++}
+diff --git a/src/LMS.API/Controllers/ReportController.cs b/src/LMS.API/Controllers/ReportController.cs
+index 3bc4890..79f9ad3 100644
+--- a/src/LMS.API/Controllers/ReportController.cs
++++ b/src/LMS.API/Controllers/ReportController.cs
+@@ -1,161 +1,45 @@
+-using LMS.Application.DTOs.Report;
++using LMS.Application.DTOs;
+ using LMS.Application.Interfaces;
+ using Microsoft.AspNetCore.Authorization;
+ using Microsoft.AspNetCore.Mvc;
+ 
+ namespace LMS.API.Controllers;
+ 
+-[ApiController]
+-[Route("api/[controller]")]
+ [Authorize(Policy = "LibrarianOrAdmin")]
+-[Produces("application/json")]
+-public class ReportController : ControllerBase
++public class ReportController : ApiControllerBase
+ {
+-    private readonly IReportService _reportService;
+-    private readonly ILogger<ReportController> _logger;
++    private readonly IReportService _reports;
+ 
+-    public ReportController(IReportService reportService, ILogger<ReportController> logger)
++    public ReportController(IReportService reports)
+     {
+-        _reportService = reportService;
+-        _logger = logger;
++        _reports = reports;
+     }
+ 
+-    /// <summary>
+-    /// Get dashboard statistics
+-    /// </summary>
+     [HttpGet("dashboard")]
+-    [ProducesResponseType(typeof(DashboardStatsDto), StatusCodes.Status200OK)]
+-    public async Task<ActionResult<DashboardStatsDto>> GetDashboardStats()
+-    {
+-        var stats = await _reportService.GetDashboardStatsAsync();
+-        return Ok(stats);
+-    }
+-
+-    /// <summary>
+-    /// Get top borrowed books
+-    /// </summary>
+-    [HttpGet("top-books")]
+-    [ProducesResponseType(typeof(IEnumerable<TopBookDto>), StatusCodes.Status200OK)]
+-    public async Task<ActionResult<IEnumerable<TopBookDto>>> GetTopBorrowedBooks(
+-        [FromQuery] int count = 10,
+-        [FromQuery] DateTime? fromDate = null,
+-        [FromQuery] DateTime? toDate = null)
+-    {
+-        var books = await _reportService.GetTopBorrowedBooksAsync(count, fromDate, toDate);
+-        return Ok(books);
+-    }
+-
+-    /// <summary>
+-    /// Get top active members
+-    /// </summary>
+-    [HttpGet("top-members")]
+-    [ProducesResponseType(typeof(IEnumerable<TopMemberDto>), StatusCodes.Status200OK)]
+-    public async Task<ActionResult<IEnumerable<TopMemberDto>>> GetTopActiveMembers(
+-        [FromQuery] int count = 10,
+-        [FromQuery] DateTime? fromDate = null,
+-        [FromQuery] DateTime? toDate = null)
+-    {
+-        var members = await _reportService.GetTopActiveMembersAsync(count, fromDate, toDate);
+-        return Ok(members);
+-    }
++    public async Task<ActionResult<DashboardStatsDto>> Dashboard(CancellationToken ct)
++        => Ok(await _reports.GetDashboardStatsAsync(ct));
+ 
+-    /// <summary>
+-    /// Get overdue report
+-    /// </summary>
+-    [HttpGet("overdue")]
+-    [ProducesResponseType(typeof(OverdueReportDto), StatusCodes.Status200OK)]
+-    public async Task<ActionResult<OverdueReportDto>> GetOverdueReport(
+-        [FromQuery] DateTime? fromDate = null,
+-        [FromQuery] DateTime? toDate = null)
+-    {
+-        var report = await _reportService.GetOverdueReportAsync(fromDate, toDate);
+-        return Ok(report);
+-    }
+-
+-    /// <summary>
+-    /// Get fines report
+-    /// </summary>
+-    [HttpGet("fines")]
+-    [ProducesResponseType(typeof(FinesReportDto), StatusCodes.Status200OK)]
+-    public async Task<ActionResult<FinesReportDto>> GetFinesReport(
+-        [FromQuery] DateTime? fromDate = null,
+-        [FromQuery] DateTime? toDate = null)
+-    {
+-        var report = await _reportService.GetFinesReportAsync(fromDate, toDate);
+-        return Ok(report);
+-    }
++    [HttpGet("top-borrowed-books")]
++    public async Task<ActionResult<IEnumerable<TopBorrowedBooksDto>>> TopBorrowedBooks([FromQuery] int count = 10, CancellationToken ct = default)
++        => Ok(await _reports.GetTopBorrowedBooksAsync(count, ct));
+ 
+-    /// <summary>
+-    /// Get circulation report
+-    /// </summary>
+-    [HttpGet("circulation")]
+-    [ProducesResponseType(typeof(CirculationReportDto), StatusCodes.Status200OK)]
+-    public async Task<ActionResult<CirculationReportDto>> GetCirculationReport(
+-        [FromQuery] DateTime? fromDate = null,
+-        [FromQuery] DateTime? toDate = null)
+-    {
+-        var report = await _reportService.GetCirculationReportAsync(fromDate, toDate);
+-        return Ok(report);
+-    }
+-
+-    /// <summary>
+-    /// Get member activity report
+-    /// </summary>
+     [HttpGet("member-activity")]
+-    [ProducesResponseType(typeof(MemberActivityReportDto), StatusCodes.Status200OK)]
+-    public async Task<ActionResult<MemberActivityReportDto>> GetMemberActivityReport(
+-        [FromQuery] Guid? memberId = null,
+-        [FromQuery] DateTime? fromDate = null,
+-        [FromQuery] DateTime? toDate = null)
+-    {
+-        var report = await _reportService.GetMemberActivityReportAsync(memberId, fromDate, toDate);
+-        return Ok(report);
+-    }
++    public async Task<ActionResult<IEnumerable<MemberActivityDto>>> MemberActivity([FromQuery] PaginationRequest request, CancellationToken ct)
++        => Ok(await _reports.GetMemberActivityAsync(request, ct));
+ 
+-    /// <summary>
+-    /// Get inventory report
+-    /// </summary>
+-    [HttpGet("inventory")]
+-    [ProducesResponseType(typeof(InventoryReportDto), StatusCodes.Status200OK)]
+-    public async Task<ActionResult<InventoryReportDto>> GetInventoryReport()
+-    {
+-        var report = await _reportService.GetInventoryReportAsync();
+-        return Ok(report);
+-    }
++    [HttpGet("category-stats")]
++    public async Task<ActionResult<IEnumerable<CategoryStatsDto>>> CategoryStats(CancellationToken ct)
++        => Ok(await _reports.GetCategoryStatsAsync(ct));
+ 
+-    /// <summary>
+-    /// Get revenue report
+-    /// </summary>
+-    [HttpGet("revenue")]
+-    [Authorize(Policy = "AdminOnly")]
+-    [ProducesResponseType(typeof(RevenueReportDto), StatusCodes.Status200OK)]
+-    public async Task<ActionResult<RevenueReportDto>> GetRevenueReport(
+-        [FromQuery] DateTime? fromDate = null,
+-        [FromQuery] DateTime? toDate = null)
+-    {
+-        var report = await _reportService.GetRevenueReportAsync(fromDate, toDate);
+-        return Ok(report);
+-    }
++    [HttpGet("monthly-stats")]
++    public async Task<ActionResult<IEnumerable<MonthlyStatsDto>>> MonthlyStats([FromQuery] int? year, CancellationToken ct)
++        => Ok(await _reports.GetMonthlyStatsAsync(year ?? DateTime.UtcNow.Year, ct));
+ 
+-    /// <summary>
+-    /// Export report to CSV
+-    /// </summary>
+-    [HttpGet("export/{reportType}")]
+-    [ProducesResponseType(typeof(FileContentResult), StatusCodes.Status200OK)]
+-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+-    public async Task<IActionResult> ExportReport(
+-        string reportType,
+-        [FromQuery] DateTime? fromDate = null,
+-        [FromQuery] DateTime? toDate = null)
+-    {
+-        try
+-        {
+-            var (content, fileName, contentType) = await _reportService.ExportReportAsync(reportType, fromDate, toDate);
+-            return File(content, contentType, fileName);
+-        }
+-        catch (ArgumentException ex)
+-        {
+-            return BadRequest(new { message = ex.Message });
+-        }
+-    }
+-}
+\ No newline at end of file
++    [HttpGet("overdue")]
++    public async Task<ActionResult<PaginatedResult<OverdueReportDto>>> Overdue([FromQuery] PaginationRequest request, CancellationToken ct)
++        => Ok(await _reports.GetOverdueReportAsync(request, ct));
++
++    [HttpGet("fines")]
++    public async Task<ActionResult<PaginatedResult<FineReportDto>>> Fines([FromQuery] PaginationRequest request, CancellationToken ct)
++        => Ok(await _reports.GetFineReportAsync(request, ct));
++}
+diff --git a/src/LMS.API/Controllers/UserController.cs b/src/LMS.API/Controllers/UserController.cs
+index 16420da..f83d729 100644
+--- a/src/LMS.API/Controllers/UserController.cs
++++ b/src/LMS.API/Controllers/UserController.cs
+@@ -1,150 +1,50 @@
+-using LMS.Application.DTOs.User;
++using LMS.Application.DTOs;
+ using LMS.Application.Interfaces;
+ using Microsoft.AspNetCore.Authorization;
+ using Microsoft.AspNetCore.Mvc;
+ 
+ namespace LMS.API.Controllers;
+ 
+-[ApiController]
+-[Route("api/[controller]")]
+ [Authorize(Policy = "AdminOnly")]
+-[Produces("application/json")]
+-public class UserController : ControllerBase
++public class UserController : ApiControllerBase
+ {
+-    private readonly IUserService _userService;
+-    private readonly ILogger<UserController> _logger;
++    private readonly IUserService _users;
+ 
+-    public UserController(IUserService userService, ILogger<UserController> logger)
++    public UserController(IUserService users)
+     {
+-        _userService = userService;
+-        _logger = logger;
++        _users = users;
+     }
+ 
+-    /// <summary>
+-    /// Get all users with pagination and search
+-    /// </summary>
+     [HttpGet]
+-    [ProducesResponseType(typeof(PagedResultDto<UserDto>), StatusCodes.Status200OK)]
+-    public async Task<ActionResult<PagedResultDto<UserDto>>> GetUsers(
+-        [FromQuery] int page = 1,
+-        [FromQuery] int pageSize = 10,
+-        [FromQuery] string? search = null,
+-        [FromQuery] bool? isActive = null)
+-    {
+-        var result = await _userService.GetUsersAsync(page, pageSize, search, isActive);
+-        return Ok(result);
+-    }
++    public async Task<ActionResult<PaginatedResult<UserDto>>> GetAll([FromQuery] UserPaginationRequest request, [FromQuery] string? search, CancellationToken ct)
++        => Ok(await _users.GetAllAsync(request, search, request.RoleId, request.IsActive, ct));
+ 
+-    /// <summary>
+-    /// Get user by ID
+-    /// </summary>
+     [HttpGet("{id:guid}")]
+-    [ProducesResponseType(typeof(UserDto), StatusCodes.Status200OK)]
+-    [ProducesResponseType(StatusCodes.Status404NotFound)]
+-    public async Task<ActionResult<UserDto>> GetUser(Guid id)
++    public async Task<ActionResult<UserDto>> GetById(Guid id, CancellationToken ct)
+     {
+-        var user = await _userService.GetUserByIdAsync(id);
+-        if (user == null)
+-        {
+-            return NotFound(new { message = "User not found" });
+-        }
+-        return Ok(user);
++        var user = await _users.GetByIdAsync(id, ct);
++        return user == null ? NotFound() : Ok(user);
+     }
+ 
+-    /// <summary>
+-    /// Create a new user (Admin only)
+-    /// </summary>
+     [HttpPost]
+-    [ProducesResponseType(typeof(UserDto), StatusCodes.Status201Created)]
+-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+-    [ProducesResponseType(StatusCodes.Status409Conflict)]
+-    public async Task<ActionResult<UserDto>> CreateUser([FromBody] CreateUserRequestDto request)
++    public async Task<ActionResult<UserDto>> Create([FromBody] CreateUserRequest request, CancellationToken ct)
+     {
+-        try
+-        {
+-            var user = await _userService.CreateUserAsync(request);
+-            return CreatedAtAction(nameof(GetUser), new { id = user.Id }, user);
+-        }
+-        catch (InvalidOperationException ex)
+-        {
+-            return Conflict(new { message = ex.Message });
+-        }
++        var user = await _users.CreateAsync(request, ct);
++        return CreatedAtAction(nameof(GetById), new { id = user.Id }, user);
+     }
+ 
+-    /// <summary>
+-    /// Update user
+-    /// </summary>
+     [HttpPut("{id:guid}")]
+-    [ProducesResponseType(typeof(UserDto), StatusCodes.Status200OK)]
+-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+-    [ProducesResponseType(StatusCodes.Status404NotFound)]
+-    public async Task<ActionResult<UserDto>> UpdateUser(Guid id, [FromBody] UpdateUserRequestDto request)
++    public async Task<ActionResult<UserDto>> Update(Guid id, [FromBody] UpdateUserRequest request, CancellationToken ct)
+     {
+-        var user = await _userService.UpdateUserAsync(id, request);
+-        if (user == null)
+-        {
+-            return NotFound(new { message = "User not found" });
+-        }
+-        return Ok(user);
++        var user = await _users.UpdateAsync(id, request, ct);
++        return user == null ? NotFound() : Ok(user);
+     }
+ 
+-    /// <summary>
+-    /// Delete user (soft delete)
+-    /// </summary>
+     [HttpDelete("{id:guid}")]
+-    [ProducesResponseType(StatusCodes.Status204NoContent)]
+-    [ProducesResponseType(StatusCodes.Status404NotFound)]
+-    public async Task<IActionResult> DeleteUser(Guid id)
+-    {
+-        var result = await _userService.DeleteUserAsync(id);
+-        if (!result)
+-        {
+-            return NotFound(new { message = "User not found" });
+-        }
+-        return NoContent();
+-    }
+-
+-    /// <summary>
+-    /// Assign role to user
+-    /// </summary>
+-    [HttpPost("{id:guid}/roles")]
+-    [ProducesResponseType(StatusCodes.Status200OK)]
+-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+-    [ProducesResponseType(StatusCodes.Status404NotFound)]
+-    public async Task<IActionResult> AssignRole(Guid id, [FromBody] AssignRoleRequestDto request)
+-    {
+-        var result = await _userService.AssignRoleAsync(id, request.RoleId);
+-        if (!result)
+-        {
+-            return BadRequest(new { message = "Failed to assign role. User or role not found." });
+-        }
+-        return Ok(new { message = "Role assigned successfully" });
+-    }
+-
+-    /// <summary>
+-    /// Remove role from user
+-    /// </summary>
+-    [HttpDelete("{id:guid}/roles/{roleId:guid}")]
+-    [ProducesResponseType(StatusCodes.Status200OK)]
+-    [ProducesResponseType(StatusCodes.Status404NotFound)]
+-    public async Task<IActionResult> RemoveRole(Guid id, Guid roleId)
+-    {
+-        var result = await _userService.RemoveRoleAsync(id, roleId);
+-        if (!result)
+-        {
+-            return NotFound(new { message = "User or role not found" });
+-        }
+-        return Ok(new { message = "Role removed successfully" });
+-    }
++    public async Task<IActionResult> Delete(Guid id, CancellationToken ct)
++        => await _users.DeleteAsync(id, ct) ? NoContent() : NotFound();
+ 
+-    /// <summary>
+-    /// Get all roles
+-    /// </summary>
+-    [HttpGet("roles")]
+-    [ProducesResponseType(typeof(IEnumerable<RoleDto>), StatusCodes.Status200OK)]
+-    public async Task<ActionResult<IEnumerable<RoleDto>>> GetRoles()
+-    {
+-        var roles = await _userService.GetRolesAsync();
+-        return Ok(roles);
+-    }
+-}
+\ No newline at end of file
++    [HttpPatch("{id:guid}/toggle-active")]
++    public async Task<IActionResult> ToggleActive(Guid id, CancellationToken ct)
++        => await _users.ToggleActiveAsync(id, ct) ? Ok() : NotFound();
++}
+diff --git a/src/LMS.API/Extensions/ServiceCollectionExtensions.cs b/src/LMS.API/Extensions/ServiceCollectionExtensions.cs
+index 298552a..280b7ab 100644
+--- a/src/LMS.API/Extensions/ServiceCollectionExtensions.cs
++++ b/src/LMS.API/Extensions/ServiceCollectionExtensions.cs
+@@ -1,11 +1,11 @@
+-using LMS.API.Middleware;
++using FluentValidation;
++using Hangfire;
+ using LMS.Application.Interfaces;
+ using LMS.Application.Services;
+ using LMS.Infrastructure.Data;
+ using LMS.Infrastructure.Repositories;
+ using LMS.Infrastructure.Security;
+ using LMS.Infrastructure.Services;
+-using LMS.Infrastructure.Services.BackgroundJobs;
+ using Microsoft.AspNetCore.Authentication.JwtBearer;
+ using Microsoft.EntityFrameworkCore;
+ using Microsoft.IdentityModel.Tokens;
+@@ -27,7 +27,7 @@ public static class ServiceCollectionExtensions
+         services.AddScoped<IReportService, ReportService>();
+ 
+         services.AddAutoMapper(typeof(LMS.Application.Mapping.AuthProfile).Assembly);
+-        services.AddValidatorsFromAssembly(typeof(LMS.Application.Validators.AuthValidators).Assembly);
++        services.AddValidatorsFromAssembly(typeof(LMS.Application.Validators.LoginRequestValidator).Assembly);
+ 
+         return services;
+     }
+@@ -59,10 +59,10 @@ public static class ServiceCollectionExtensions
+         services.AddScoped<ISettingRepository, SettingRepository>();
+         services.AddScoped<IAuditLogRepository, AuditLogRepository>();
+ 
+-        services.Configure<JwtSettings>(configuration.GetSection("JwtSettings"));
++        // TokenService reads the "Jwt" section directly from IConfiguration.
+         services.AddScoped<ITokenService, TokenService>();
+-        services.AddScoped<IPasswordHasher, PasswordHasher>();
+ 
++        services.Configure<EmailSettings>(configuration.GetSection("Email"));
+         services.AddScoped<IEmailService, EmailService>();
+ 
+         var fileStoragePath = configuration["FileStorage:BasePath"] ?? Path.Combine(Directory.GetCurrentDirectory(), "uploads");
+@@ -79,7 +79,10 @@ public static class ServiceCollectionExtensions
+ 
+     public static IServiceCollection AddApiServices(this IServiceCollection services, IConfiguration configuration)
+     {
+-        var jwtSettings = configuration.GetSection("JwtSettings").Get<JwtSettings>() ?? new JwtSettings();
++        // Must use the SAME keys/defaults as TokenService (section "Jwt"), otherwise tokens fail validation.
++        var secretKey = configuration["Jwt:SecretKey"] ?? "your-super-secret-jwt-key-change-in-production-min-32-chars";
++        var issuer = configuration["Jwt:Issuer"] ?? "LibraryManagementSystem";
++        var audience = configuration["Jwt:Audience"] ?? "LibraryManagementSystem";
+ 
+         services.AddAuthentication(options =>
+         {
+@@ -94,9 +97,9 @@ public static class ServiceCollectionExtensions
+                 ValidateAudience = true,
+                 ValidateLifetime = true,
+                 ValidateIssuerSigningKey = true,
+-                ValidIssuer = jwtSettings.Issuer,
+-                ValidAudience = jwtSettings.Audience,
+-                IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtSettings.SecretKey)),
++                ValidIssuer = issuer,
++                ValidAudience = audience,
++                IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(secretKey)),
+                 ClockSkew = TimeSpan.Zero
+             };
+ 
+@@ -189,12 +192,3 @@ public static class ServiceCollectionExtensions
+         return services;
+     }
+ }
+-
+-public class JwtSettings
+-{
+-    public string SecretKey { get; set; } = string.Empty;
+-    public string Issuer { get; set; } = string.Empty;
+-    public string Audience { get; set; } = string.Empty;
+-    public int AccessTokenExpirationMinutes { get; set; } = 15;
+-    public int RefreshTokenExpirationDays { get; set; } = 7;
+-}
+\ No newline at end of file
+diff --git a/src/LMS.API/Program.cs b/src/LMS.API/Program.cs
+index 5bac5a7..9cf574f 100644
+--- a/src/LMS.API/Program.cs
++++ b/src/LMS.API/Program.cs
+@@ -40,9 +40,18 @@ using (var scope = app.Services.CreateScope())
+ 
+     try
+     {
+-        logger.LogInformation("Applying database migrations...");
+-        await dbContext.Database.MigrateAsync();
+-        logger.LogInformation("Database migrations applied successfully");
++        // No migrations created yet -> create schema straight from the model.
++        // Once you run `dotnet ef migrations add InitialCreate`, MigrateAsync is used automatically.
++        if ((await dbContext.Database.GetMigrationsAsync()).Any())
++        {
++            logger.LogInformation("Applying database migrations...");
++            await dbContext.Database.MigrateAsync();
++        }
++        else
++        {
++            logger.LogInformation("No migrations found, creating database from model...");
++            await dbContext.Database.EnsureCreatedAsync();
++        }
+ 
+         logger.LogInformation("Seeding database...");
+         await DbSeeder.SeedAsync(dbContext);
+diff --git a/src/LMS.API/appsettings.json b/src/LMS.API/appsettings.json
+new file mode 100644
+index 0000000..04017ba
+--- /dev/null
++++ b/src/LMS.API/appsettings.json
+@@ -0,0 +1,40 @@
++{
++  "ConnectionStrings": {
++    "DefaultConnection": "Server=(localdb)\\MSSQLLocalDB;Database=LibraryManagementDb;Trusted_Connection=True;TrustServerCertificate=True;MultipleActiveResultSets=True"
++  },
++  "Jwt": {
++    "SecretKey": "dev-only-secret-key-change-me-at-least-32-characters-long",
++    "Issuer": "LibraryManagementSystem",
++    "Audience": "LibraryManagementSystem",
++    "AccessTokenExpiryMinutes": "60"
++  },
++  "FileStorage": {
++    "BasePath": "uploads",
++    "BaseUrl": "https://localhost:7001/uploads",
++    "MaxFileSizeMB": 10
++  },
++  "Email": {
++    "SmtpHost": "",
++    "SmtpPort": 587,
++    "SmtpUser": "",
++    "SmtpPassword": "",
++    "FromEmail": "noreply@library.local",
++    "FromName": "Library Management System",
++    "EnableSsl": true
++  },
++  "Serilog": {
++    "MinimumLevel": {
++      "Default": "Information",
++      "Override": {
++        "Microsoft": "Warning",
++        "Microsoft.EntityFrameworkCore": "Warning",
++        "System": "Warning"
++      }
++    },
++    "WriteTo": [
++      { "Name": "Console" },
++      { "Name": "File", "Args": { "path": "logs/lms-.log", "rollingInterval": "Day" } }
++    ]
++  },
++  "AllowedHosts": "*"
++}

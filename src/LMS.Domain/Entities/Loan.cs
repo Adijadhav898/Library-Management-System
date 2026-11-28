@@ -18,6 +18,7 @@ public class Loan : BaseEntity
     public LoanStatus Status { get; set; } = LoanStatus.Active;
     public Guid? ReturnedByUserId { get; set; }
     public User? ReturnedByUser { get; set; }
+    public string? Notes { get; set; }
 
     // Navigation properties
     public ICollection<Fine> Fines { get; set; } = new List<Fine>();

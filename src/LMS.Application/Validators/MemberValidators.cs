@@ -7,10 +7,6 @@ public class CreateMemberRequestValidator : AbstractValidator<CreateMemberReques
 {
     public CreateMemberRequestValidator()
     {
-        RuleFor(x => x.MemberNumber)
-            .NotEmpty().WithMessage("Member number is required")
-            .MaximumLength(50).WithMessage("Member number cannot exceed 50 characters");
-
         RuleFor(x => x.FirstName)
             .NotEmpty().WithMessage("First name is required")
             .MaximumLength(100).WithMessage("First name cannot exceed 100 characters");
@@ -29,12 +25,7 @@ public class CreateMemberRequestValidator : AbstractValidator<CreateMemberReques
             .When(x => !string.IsNullOrWhiteSpace(x.PhoneNumber));
 
         RuleFor(x => x.DateOfBirth)
-            .LessThan(DateTime.Today).WithMessage("Date of birth must be in the past")
-            .When(x => x.DateOfBirth.HasValue);
-
-        RuleFor(x => x.Gender)
-            .IsInEnum().WithMessage("Invalid gender value")
-            .When(x => x.Gender.HasValue);
+            .LessThan(DateTime.Today).WithMessage("Date of birth must be in the past");
 
         RuleFor(x => x.Address)
             .MaximumLength(500).WithMessage("Address cannot exceed 500 characters")
@@ -43,13 +34,9 @@ public class CreateMemberRequestValidator : AbstractValidator<CreateMemberReques
         RuleFor(x => x.MemberTypeId)
             .NotEmpty().WithMessage("Member type is required");
 
-        RuleFor(x => x.MembershipStartDate)
-            .NotEmpty().WithMessage("Membership start date is required")
-            .LessThanOrEqualTo(DateTime.Today).WithMessage("Membership start date cannot be in the future");
-
-        RuleFor(x => x.MembershipEndDate)
-            .GreaterThan(x => x.MembershipStartDate).WithMessage("Membership end date must be after start date")
-            .When(x => x.MembershipEndDate.HasValue && x.MembershipStartDate.HasValue);
+        RuleFor(x => x.ExpiryDate)
+            .GreaterThan(DateTime.Today).WithMessage("Expiry date must be in the future")
+            .When(x => x.ExpiryDate.HasValue);
     }
 }
 
@@ -57,13 +44,6 @@ public class UpdateMemberRequestValidator : AbstractValidator<UpdateMemberReques
 {
     public UpdateMemberRequestValidator()
     {
-        RuleFor(x => x.Id)
-            .NotEmpty().WithMessage("Member ID is required");
-
-        RuleFor(x => x.MemberNumber)
-            .NotEmpty().WithMessage("Member number is required")
-            .MaximumLength(50).WithMessage("Member number cannot exceed 50 characters");
-
         RuleFor(x => x.FirstName)
             .NotEmpty().WithMessage("First name is required")
             .MaximumLength(100).WithMessage("First name cannot exceed 100 characters");
@@ -81,14 +61,6 @@ public class UpdateMemberRequestValidator : AbstractValidator<UpdateMemberReques
             .Matches(@"^\+?[1-9]\d{1,14}$").WithMessage("Invalid phone number format")
             .When(x => !string.IsNullOrWhiteSpace(x.PhoneNumber));
 
-        RuleFor(x => x.DateOfBirth)
-            .LessThan(DateTime.Today).WithMessage("Date of birth must be in the past")
-            .When(x => x.DateOfBirth.HasValue);
-
-        RuleFor(x => x.Gender)
-            .IsInEnum().WithMessage("Invalid gender value")
-            .When(x => x.Gender.HasValue);
-
         RuleFor(x => x.Address)
             .MaximumLength(500).WithMessage("Address cannot exceed 500 characters")
             .When(x => !string.IsNullOrWhiteSpace(x.Address));
@@ -96,13 +68,9 @@ public class UpdateMemberRequestValidator : AbstractValidator<UpdateMemberReques
         RuleFor(x => x.MemberTypeId)
             .NotEmpty().WithMessage("Member type is required");
 
-        RuleFor(x => x.MembershipStartDate)
-            .NotEmpty().WithMessage("Membership start date is required")
-            .LessThanOrEqualTo(DateTime.Today).WithMessage("Membership start date cannot be in the future");
-
-        RuleFor(x => x.MembershipEndDate)
-            .GreaterThan(x => x.MembershipStartDate).WithMessage("Membership end date must be after start date")
-            .When(x => x.MembershipEndDate.HasValue && x.MembershipStartDate.HasValue);
+        RuleFor(x => x.ExpiryDate)
+            .GreaterThan(DateTime.Today).WithMessage("Expiry date must be in the future")
+            .When(x => x.ExpiryDate.HasValue);
     }
 }
 
@@ -148,10 +116,6 @@ public class CreateMemberTypeRequestValidator : AbstractValidator<CreateMemberTy
             .NotEmpty().WithMessage("Name is required")
             .MaximumLength(100).WithMessage("Name cannot exceed 100 characters");
 
-        RuleFor(x => x.Description)
-            .MaximumLength(500).WithMessage("Description cannot exceed 500 characters")
-            .When(x => !string.IsNullOrWhiteSpace(x.Description));
-
         RuleFor(x => x.MaxBooksAllowed)
             .GreaterThan(0).WithMessage("Max books allowed must be greater than 0");
 
@@ -161,14 +125,8 @@ public class CreateMemberTypeRequestValidator : AbstractValidator<CreateMemberTy
         RuleFor(x => x.MaxRenewalsAllowed)
             .GreaterThanOrEqualTo(0).WithMessage("Max renewals allowed cannot be negative");
 
-        RuleFor(x => x.FineRatePerDay)
+        RuleFor(x => x.FinePerDay)
             .GreaterThanOrEqualTo(0).WithMessage("Fine rate per day cannot be negative");
-
-        RuleFor(x => x.MembershipFee)
-            .GreaterThanOrEqualTo(0).WithMessage("Membership fee cannot be negative");
-
-        RuleFor(x => x.MembershipDurationDays)
-            .GreaterThan(0).WithMessage("Membership duration must be greater than 0");
     }
 }
 
@@ -176,16 +134,9 @@ public class UpdateMemberTypeRequestValidator : AbstractValidator<UpdateMemberTy
 {
     public UpdateMemberTypeRequestValidator()
     {
-        RuleFor(x => x.Id)
-            .NotEmpty().WithMessage("Member type ID is required");
-
         RuleFor(x => x.Name)
             .NotEmpty().WithMessage("Name is required")
             .MaximumLength(100).WithMessage("Name cannot exceed 100 characters");
-
-        RuleFor(x => x.Description)
-            .MaximumLength(500).WithMessage("Description cannot exceed 500 characters")
-            .When(x => !string.IsNullOrWhiteSpace(x.Description));
 
         RuleFor(x => x.MaxBooksAllowed)
             .GreaterThan(0).WithMessage("Max books allowed must be greater than 0");
@@ -196,13 +147,7 @@ public class UpdateMemberTypeRequestValidator : AbstractValidator<UpdateMemberTy
         RuleFor(x => x.MaxRenewalsAllowed)
             .GreaterThanOrEqualTo(0).WithMessage("Max renewals allowed cannot be negative");
 
-        RuleFor(x => x.FineRatePerDay)
+        RuleFor(x => x.FinePerDay)
             .GreaterThanOrEqualTo(0).WithMessage("Fine rate per day cannot be negative");
-
-        RuleFor(x => x.MembershipFee)
-            .GreaterThanOrEqualTo(0).WithMessage("Membership fee cannot be negative");
-
-        RuleFor(x => x.MembershipDurationDays)
-            .GreaterThan(0).WithMessage("Membership duration must be greater than 0");
     }
 }

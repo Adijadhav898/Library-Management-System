@@ -121,7 +121,9 @@ public class NotificationService : INotificationService
             notification.ReadAt = DateTime.UtcNow;
         }
 
-        await _notificationRepository.UpdateRangeAsync(unreadNotifications, cancellationToken);
+        foreach (var notification in unreadNotifications)
+            await _notificationRepository.UpdateAsync(notification, cancellationToken);
+
         return true;
     }
 
@@ -141,7 +143,7 @@ public class NotificationService : INotificationService
             return;
 
         var daysOverdue = (DateTime.UtcNow.Date - loan.DueDate.Date).Days;
-        var estimatedFine = daysOverdue * loan.BookCopy?.Book?.MemberType?.MaxBooksAllowed ?? 0;
+        var estimatedFine = daysOverdue * (member.MemberType?.FinePerDay ?? 0m);
 
         var title = "Overdue Book Reminder";
         var message = $"Your book '{loan.BookCopy?.Book?.Title}' (Copy: {loan.BookCopy?.CopyNumber}) was due on {loan.DueDate:yyyy-MM-dd}. " +
@@ -169,8 +171,8 @@ public class NotificationService : INotificationService
             return;
 
         var title = "Reserved Book Ready for Pickup";
-        var message = $"Your reserved book '{reservation.BookCopy?.Book?.Title}' is now available for pickup. " +
-                      $"Please collect it from the library within 3 days (until {reservation.ExpiryDate:yyyy-MM-dd}).";
+        var message = $"Your reserved book '{reservation.Book?.Title}' is now available for pickup. " +
+                      $"Please collect it from the library within 3 days (until {reservation.ExpiresAt:yyyy-MM-dd}).";
 
         await CreateAsync(new CreateNotificationRequest
         {
@@ -196,7 +198,7 @@ public class NotificationService : INotificationService
         var title = "Fine Incurred";
         var message = $"A fine of {fine.Amount:C} has been applied to your account for " +
                       $"'{loan?.BookCopy?.Book?.Title}' (Copy: {loan?.BookCopy?.CopyNumber}). " +
-                      $"Reason: {fine.Reason}. Please pay at your earliest convenience.";
+                      $"Reason: {fine.Description ?? fine.FineType.ToString()}. Please pay at your earliest convenience.";
 
         await CreateAsync(new CreateNotificationRequest
         {

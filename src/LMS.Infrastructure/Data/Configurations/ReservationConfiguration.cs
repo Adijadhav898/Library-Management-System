@@ -12,6 +12,7 @@ public class ReservationConfiguration : IEntityTypeConfiguration<Reservation>
         builder.HasKey(r => r.Id);
 
         builder.Property(r => r.ExpiresAt).IsRequired();
+        builder.Property(r => r.Notes).HasMaxLength(500);
 
         builder.HasIndex(r => r.BookId);
         builder.HasIndex(r => r.MemberId);
@@ -27,5 +28,12 @@ public class ReservationConfiguration : IEntityTypeConfiguration<Reservation>
             .WithMany(m => m.Reservations)
             .HasForeignKey(r => r.MemberId)
             .OnDelete(DeleteBehavior.Cascade);
+        
+
+        builder.HasOne(r => r.BookCopy)
+            .WithMany()
+            .HasForeignKey(r => r.BookCopyId)
+            .IsRequired(false)
+            .OnDelete(DeleteBehavior.Restrict);
     }
 }

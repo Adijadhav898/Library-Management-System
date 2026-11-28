@@ -98,7 +98,7 @@ public class UserService : IUserService
         user.PhoneNumber = request.PhoneNumber;
         user.Address = request.Address;
         user.DateOfBirth = request.DateOfBirth;
-        user.IsActive = request.IsActive;
+        user.IsActive = request.IsActive ?? user.IsActive;
         user.UpdatedAt = DateTime.UtcNow;
 
         if (request.RoleIds != null)

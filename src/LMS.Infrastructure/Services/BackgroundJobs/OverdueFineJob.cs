@@ -1,5 +1,6 @@
 using Hangfire;
 using LMS.Application.Interfaces;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
 namespace LMS.Infrastructure.Services.BackgroundJobs;
@@ -16,21 +17,21 @@ public class OverdueFineJob
     }
 
     [AutomaticRetry(Attempts = 3)]
-    public async Task ProcessOverdueFinesAsync()
+    public async Task ProcessOverdueLoansAsync()
     {
-        _logger.LogInformation("Starting overdue fines processing job at {Time}", DateTime.UtcNow);
+        _logger.LogInformation("Starting overdue loans processing job at {Time}", DateTime.UtcNow);
 
         using var scope = _serviceProvider.CreateScope();
         var circulationService = scope.ServiceProvider.GetRequiredService<ICirculationService>();
 
         try
         {
-            await circulationService.ProcessOverdueFinesAsync();
-            _logger.LogInformation("Overdue fines processing completed successfully");
+            await circulationService.ProcessOverdueLoansAsync();
+            _logger.LogInformation("Overdue loans processing completed successfully");
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error processing overdue fines");
+            _logger.LogError(ex, "Error processing overdue loans");
             throw;
         }
     }
@@ -51,26 +52,6 @@ public class OverdueFineJob
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error processing expired reservations");
-            throw;
-        }
-    }
-
-    [AutomaticRetry(Attempts = 3)]
-    public async Task SendDueDateRemindersAsync()
-    {
-        _logger.LogInformation("Starting due date reminders job at {Time}", DateTime.UtcNow);
-
-        using var scope = _serviceProvider.CreateScope();
-        var notificationService = scope.ServiceProvider.GetRequiredService<INotificationService>();
-
-        try
-        {
-            await notificationService.SendDueDateRemindersAsync();
-            _logger.LogInformation("Due date reminders sent successfully");
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error sending due date reminders");
             throw;
         }
     }

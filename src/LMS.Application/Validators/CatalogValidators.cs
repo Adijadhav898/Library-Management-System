@@ -25,9 +25,6 @@ public class UpdateCategoryRequestValidator : AbstractValidator<UpdateCategoryRe
 {
     public UpdateCategoryRequestValidator()
     {
-        RuleFor(x => x.Id)
-            .NotEmpty().WithMessage("Category ID is required");
-
         RuleFor(x => x.Name)
             .NotEmpty().WithMessage("Name is required")
             .MaximumLength(100).WithMessage("Name cannot exceed 100 characters");
@@ -38,8 +35,6 @@ public class UpdateCategoryRequestValidator : AbstractValidator<UpdateCategoryRe
 
         RuleFor(x => x.ParentCategoryId)
             .NotEmpty().WithMessage("Parent category ID cannot be empty when specified")
-            .When(x => x.ParentCategoryId.HasValue)
-            .Must((request, parentId) => parentId != request.Id).WithMessage("Category cannot be its own parent")
             .When(x => x.ParentCategoryId.HasValue);
     }
 }
@@ -56,9 +51,9 @@ public class CreatePublisherRequestValidator : AbstractValidator<CreatePublisher
             .MaximumLength(500).WithMessage("Address cannot exceed 500 characters")
             .When(x => !string.IsNullOrWhiteSpace(x.Address));
 
-        RuleFor(x => x.PhoneNumber)
+        RuleFor(x => x.Phone)
             .Matches(@"^\+?[1-9]\d{1,14}$").WithMessage("Invalid phone number format")
-            .When(x => !string.IsNullOrWhiteSpace(x.PhoneNumber));
+            .When(x => !string.IsNullOrWhiteSpace(x.Phone));
 
         RuleFor(x => x.Email)
             .EmailAddress().WithMessage("Invalid email format")
@@ -75,9 +70,6 @@ public class UpdatePublisherRequestValidator : AbstractValidator<UpdatePublisher
 {
     public UpdatePublisherRequestValidator()
     {
-        RuleFor(x => x.Id)
-            .NotEmpty().WithMessage("Publisher ID is required");
-
         RuleFor(x => x.Name)
             .NotEmpty().WithMessage("Name is required")
             .MaximumLength(200).WithMessage("Name cannot exceed 200 characters");
@@ -86,9 +78,9 @@ public class UpdatePublisherRequestValidator : AbstractValidator<UpdatePublisher
             .MaximumLength(500).WithMessage("Address cannot exceed 500 characters")
             .When(x => !string.IsNullOrWhiteSpace(x.Address));
 
-        RuleFor(x => x.PhoneNumber)
+        RuleFor(x => x.Phone)
             .Matches(@"^\+?[1-9]\d{1,14}$").WithMessage("Invalid phone number format")
-            .When(x => !string.IsNullOrWhiteSpace(x.PhoneNumber));
+            .When(x => !string.IsNullOrWhiteSpace(x.Phone));
 
         RuleFor(x => x.Email)
             .EmailAddress().WithMessage("Invalid email format")
@@ -131,9 +123,6 @@ public class UpdateAuthorRequestValidator : AbstractValidator<UpdateAuthorReques
 {
     public UpdateAuthorRequestValidator()
     {
-        RuleFor(x => x.Id)
-            .NotEmpty().WithMessage("Author ID is required");
-
         RuleFor(x => x.FirstName)
             .NotEmpty().WithMessage("First name is required")
             .MaximumLength(100).WithMessage("First name cannot exceed 100 characters");
@@ -178,17 +167,13 @@ public class CreateBookRequestValidator : AbstractValidator<CreateBookRequest>
             .LessThanOrEqualTo(DateTime.Now.Year + 1).WithMessage("Publication year cannot be in the future")
             .When(x => x.PublicationYear.HasValue);
 
-        RuleFor(x => x.NumberOfPages)
+        RuleFor(x => x.Pages)
             .GreaterThan(0).WithMessage("Number of pages must be greater than 0")
-            .When(x => x.NumberOfPages.HasValue);
+            .When(x => x.Pages.HasValue);
 
         RuleFor(x => x.Language)
             .MaximumLength(50).WithMessage("Language cannot exceed 50 characters")
             .When(x => !string.IsNullOrWhiteSpace(x.Language));
-
-        RuleFor(x => x.Summary)
-            .MaximumLength(5000).WithMessage("Summary cannot exceed 5000 characters")
-            .When(x => !string.IsNullOrWhiteSpace(x.Summary));
 
         RuleFor(x => x.CategoryId)
             .NotEmpty().WithMessage("Category is required");
@@ -206,9 +191,6 @@ public class UpdateBookRequestValidator : AbstractValidator<UpdateBookRequest>
 {
     public UpdateBookRequestValidator()
     {
-        RuleFor(x => x.Id)
-            .NotEmpty().WithMessage("Book ID is required");
-
         RuleFor(x => x.Title)
             .NotEmpty().WithMessage("Title is required")
             .MaximumLength(500).WithMessage("Title cannot exceed 500 characters");
@@ -227,17 +209,13 @@ public class UpdateBookRequestValidator : AbstractValidator<UpdateBookRequest>
             .LessThanOrEqualTo(DateTime.Now.Year + 1).WithMessage("Publication year cannot be in the future")
             .When(x => x.PublicationYear.HasValue);
 
-        RuleFor(x => x.NumberOfPages)
+        RuleFor(x => x.Pages)
             .GreaterThan(0).WithMessage("Number of pages must be greater than 0")
-            .When(x => x.NumberOfPages.HasValue);
+            .When(x => x.Pages.HasValue);
 
         RuleFor(x => x.Language)
             .MaximumLength(50).WithMessage("Language cannot exceed 50 characters")
             .When(x => !string.IsNullOrWhiteSpace(x.Language));
-
-        RuleFor(x => x.Summary)
-            .MaximumLength(5000).WithMessage("Summary cannot exceed 5000 characters")
-            .When(x => !string.IsNullOrWhiteSpace(x.Summary));
 
         RuleFor(x => x.CategoryId)
             .NotEmpty().WithMessage("Category is required");
@@ -279,9 +257,6 @@ public class UpdateBookCopyRequestValidator : AbstractValidator<UpdateBookCopyRe
 {
     public UpdateBookCopyRequestValidator()
     {
-        RuleFor(x => x.Id)
-            .NotEmpty().WithMessage("Book copy ID is required");
-
         RuleFor(x => x.CopyNumber)
             .NotEmpty().WithMessage("Copy number is required")
             .MaximumLength(50).WithMessage("Copy number cannot exceed 50 characters");

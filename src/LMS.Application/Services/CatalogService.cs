@@ -437,7 +437,7 @@ public class CatalogService : ICatalogService
 
     public async Task<BookDto> CreateBookAsync(CreateBookRequest request, CancellationToken cancellationToken = default)
     {
-        var isUnique = await _bookRepository.IsISBNUniqueAsync(request.ISBN, cancellationToken);
+        var isUnique = await _bookRepository.IsISBNUniqueAsync(request.ISBN, null, cancellationToken);
         if (!isUnique)
             throw new InvalidOperationException("ISBN already exists");
 
@@ -607,7 +607,7 @@ public class CatalogService : ICatalogService
 
     public async Task<BookCopyDto> CreateBookCopyAsync(CreateBookCopyRequest request, CancellationToken cancellationToken = default)
     {
-        var isUnique = await _bookCopyRepository.IsBarcodeUniqueAsync(request.Barcode, cancellationToken);
+        var isUnique = await _bookCopyRepository.IsBarcodeUniqueAsync(request.Barcode, null, cancellationToken);
         if (!isUnique)
             throw new InvalidOperationException("Barcode already exists");
 
@@ -619,8 +619,8 @@ public class CatalogService : ICatalogService
             Status = CopyStatus.Available,
             Location = request.Location,
             Condition = request.Condition,
-            AcquisitionDate = request.AcquisitionDate,
-            Cost = request.Cost,
+            AcquisitionDate = request.AcquisitionDate ?? DateTime.UtcNow,
+            Cost = request.Cost ?? 0m,
             CreatedAt = DateTime.UtcNow
         };
 
