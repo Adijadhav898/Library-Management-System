@@ -82,20 +82,20 @@ public class GenericRepository<T> : IGenericRepository<T> where T : BaseEntity
 
     public virtual Task UpdateAsync(T entity, CancellationToken cancellationToken = default)
     {
-        _dbSet.Update(entity);
+        MarkForUpdate(entity);
         return Task.CompletedTask;
     }
 
     public virtual void Update(T entity)
     {
-        _dbSet.Update(entity);
+        MarkForUpdate(entity);
     }
 
     public virtual void Remove(T entity)
     {
         // Soft delete
         entity.IsDeleted = true;
-        _dbSet.Update(entity);
+        MarkForUpdate(entity);
     }
 
     public virtual void RemoveRange(IEnumerable<T> entities)
@@ -103,8 +103,19 @@ public class GenericRepository<T> : IGenericRepository<T> where T : BaseEntity
         foreach (var entity in entities)
         {
             entity.IsDeleted = true;
+            MarkForUpdate(entity);
         }
-        _dbSet.UpdateRange(entities);
+    }
+
+    /// <summary>
+    /// Only attach+update entities EF is not tracking yet. For tracked entities the change tracker already
+    /// sees property changes; calling DbSet.Update on them would flip a freshly Added entity to Modified
+    /// (-> UPDATE instead of INSERT, foreign key errors) and mark whole graphs as Modified.
+    /// </summary>
+    private void MarkForUpdate(T entity)
+    {
+        if (_context.Entry(entity).State == EntityState.Detached)
+            _dbSet.Update(entity);
     }
 
     public virtual async Task<bool> ExistsAsync(Guid id, CancellationToken cancellationToken = default)

@@ -11,6 +11,15 @@ public class MemberRepository : GenericRepository<Member>, IMemberRepository
 {
     public MemberRepository(LibraryDbContext context) : base(context) { }
 
+    /// <summary>Loads the entity together with the relations the DTO mappers need (and applies the soft-delete filter).</summary>
+    public override async Task<Member?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        return await _dbSet
+            .Include(x => x.User)
+            .Include(x => x.MemberType)
+            .FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
+    }
+
     public async Task<Member?> GetByMemberNumberAsync(string memberNumber, CancellationToken cancellationToken = default)
     {
         return await _dbSet

@@ -11,6 +11,17 @@ public class LoanRepository : GenericRepository<Loan>, ILoanRepository
 {
     public LoanRepository(LibraryDbContext context) : base(context) { }
 
+    /// <summary>Loads the entity together with the relations the DTO mappers need (and applies the soft-delete filter).</summary>
+    public override async Task<Loan?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        return await _dbSet
+            .Include(x => x.BookCopy).ThenInclude(bc => bc.Book)
+            .Include(x => x.Member).ThenInclude(m => m.User)
+            .Include(x => x.IssuedBy)
+            .Include(x => x.ReturnedByUser)
+            .FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
+    }
+
     public async Task<PaginatedResult<Loan>> GetPagedAsync(PaginationRequest request, Guid? memberId = null, Guid? bookCopyId = null, LoanStatus? status = null, bool? isOverdue = null, CancellationToken cancellationToken = default)
     {
         var query = _dbSet

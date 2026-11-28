@@ -123,7 +123,7 @@ public static class ServiceCollectionExtensions
             options.AddPolicy("MemberOrAbove", policy => policy.RequireRole("Member", "Librarian", "Admin"));
         });
 
-        services.AddControllers()
+        services.AddControllers(options => options.Filters.Add<LMS.API.Filters.UnitOfWorkFilter>())
             .AddJsonOptions(options =>
             {
                 options.JsonSerializerOptions.PropertyNamingPolicy = null;

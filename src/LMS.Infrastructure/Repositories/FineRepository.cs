@@ -11,6 +11,15 @@ public class FineRepository : GenericRepository<Fine>, IFineRepository
 {
     public FineRepository(LibraryDbContext context) : base(context) { }
 
+    /// <summary>Loads the entity together with the relations the DTO mappers need (and applies the soft-delete filter).</summary>
+    public override async Task<Fine?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        return await _dbSet
+            .Include(x => x.Member).ThenInclude(m => m.User)
+            .Include(x => x.Loan).ThenInclude(l => l.BookCopy).ThenInclude(bc => bc.Book)
+            .FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
+    }
+
     public async Task<PaginatedResult<Fine>> GetPagedAsync(PaginationRequest request, Guid? memberId = null, FineStatus? status = null, CancellationToken cancellationToken = default)
     {
         var query = _dbSet

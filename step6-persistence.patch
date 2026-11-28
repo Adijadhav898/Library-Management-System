@@ -1,0 +1,89 @@
+diff --git a/src/LMS.API/Extensions/ServiceCollectionExtensions.cs b/src/LMS.API/Extensions/ServiceCollectionExtensions.cs
+index 280b7ab..e46c990 100644
+--- a/src/LMS.API/Extensions/ServiceCollectionExtensions.cs
++++ b/src/LMS.API/Extensions/ServiceCollectionExtensions.cs
+@@ -123,7 +123,7 @@ public static class ServiceCollectionExtensions
+             options.AddPolicy("MemberOrAbove", policy => policy.RequireRole("Member", "Librarian", "Admin"));
+         });
+ 
+-        services.AddControllers()
++        services.AddControllers(options => options.Filters.Add<LMS.API.Filters.UnitOfWorkFilter>())
+             .AddJsonOptions(options =>
+             {
+                 options.JsonSerializerOptions.PropertyNamingPolicy = null;
+diff --git a/src/LMS.API/Filters/UnitOfWorkFilter.cs b/src/LMS.API/Filters/UnitOfWorkFilter.cs
+new file mode 100644
+index 0000000..97df5f0
+--- /dev/null
++++ b/src/LMS.API/Filters/UnitOfWorkFilter.cs
+@@ -0,0 +1,38 @@
++using LMS.Application.Interfaces;
++using Microsoft.AspNetCore.Mvc;
++using Microsoft.AspNetCore.Mvc.Filters;
++
++namespace LMS.API.Filters;
++
++/// <summary>
++/// Unit-of-work per request: services/repositories only stage changes in the DbContext;
++/// this filter commits them with ONE SaveChanges (= one DB transaction) after a
++/// successful write action (POST/PUT/PATCH/DELETE). If the action throws or returns
++/// a 4xx/5xx result, nothing is saved.
++/// </summary>
++public class UnitOfWorkFilter : IAsyncActionFilter
++{
++    private readonly IUnitOfWork _unitOfWork;
++
++    public UnitOfWorkFilter(IUnitOfWork unitOfWork)
++    {
++        _unitOfWork = unitOfWork;
++    }
++
++    public async Task OnActionExecutionAsync(ActionExecutingContext context, ActionExecutionDelegate next)
++    {
++        var executed = await next();
++
++        var method = context.HttpContext.Request.Method;
++        var isWrite = HttpMethods.IsPost(method) || HttpMethods.IsPut(method)
++                      || HttpMethods.IsPatch(method) || HttpMethods.IsDelete(method);
++        if (!isWrite || executed.Exception != null && !executed.ExceptionHandled)
++            return;
++
++        var status = executed.Result is IStatusCodeActionResult sc ? sc.StatusCode ?? 200 : 200;
++        if (status >= 400)
++            return;
++
++        await _unitOfWork.SaveChangesAsync(context.HttpContext.RequestAborted);
++    }
++}
+diff --git a/src/LMS.Infrastructure/Services/BackgroundJobs/NotificationJob.cs b/src/LMS.Infrastructure/Services/BackgroundJobs/NotificationJob.cs
+index afcbbec..3b65ed8 100644
+--- a/src/LMS.Infrastructure/Services/BackgroundJobs/NotificationJob.cs
++++ b/src/LMS.Infrastructure/Services/BackgroundJobs/NotificationJob.cs
+@@ -33,6 +33,7 @@ public class NotificationJob
+                 await notificationService.SendOverdueNotificationAsync(loan.Id);
+             }
+ 
++            await scope.ServiceProvider.GetRequiredService<IUnitOfWork>().SaveChangesAsync();
+             _logger.LogInformation("Overdue notifications sent successfully");
+         }
+         catch (Exception ex)
+diff --git a/src/LMS.Infrastructure/Services/BackgroundJobs/OverdueFineJob.cs b/src/LMS.Infrastructure/Services/BackgroundJobs/OverdueFineJob.cs
+index 917f42e..ff17e2d 100644
+--- a/src/LMS.Infrastructure/Services/BackgroundJobs/OverdueFineJob.cs
++++ b/src/LMS.Infrastructure/Services/BackgroundJobs/OverdueFineJob.cs
+@@ -27,6 +27,7 @@ public class OverdueFineJob
+         try
+         {
+             await circulationService.ProcessOverdueLoansAsync();
++            await scope.ServiceProvider.GetRequiredService<IUnitOfWork>().SaveChangesAsync();
+             _logger.LogInformation("Overdue loans processing completed successfully");
+         }
+         catch (Exception ex)
+@@ -47,6 +48,7 @@ public class OverdueFineJob
+         try
+         {
+             await circulationService.ProcessExpiredReservationsAsync();
++            await scope.ServiceProvider.GetRequiredService<IUnitOfWork>().SaveChangesAsync();
+             _logger.LogInformation("Expired reservations processing completed successfully");
+         }
+         catch (Exception ex)

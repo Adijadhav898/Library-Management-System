@@ -1,0 +1,435 @@
+diff --git a/src/LMS.Application/Services/CatalogService.cs b/src/LMS.Application/Services/CatalogService.cs
+index 813663f..e13e5df 100644
+--- a/src/LMS.Application/Services/CatalogService.cs
++++ b/src/LMS.Application/Services/CatalogService.cs
+@@ -7,6 +7,7 @@ namespace LMS.Application.Services;
+ 
+ public class CatalogService : ICatalogService
+ {
++    private readonly IUnitOfWork _unitOfWork;
+     private readonly ICategoryRepository _categoryRepository;
+     private readonly IPublisherRepository _publisherRepository;
+     private readonly IAuthorRepository _authorRepository;
+@@ -18,13 +19,15 @@ public class CatalogService : ICatalogService
+         IPublisherRepository publisherRepository,
+         IAuthorRepository authorRepository,
+         IBookRepository bookRepository,
+-        IBookCopyRepository bookCopyRepository)
++        IBookCopyRepository bookCopyRepository,
++        IUnitOfWork unitOfWork)
+     {
+         _categoryRepository = categoryRepository;
+         _publisherRepository = publisherRepository;
+         _authorRepository = authorRepository;
+         _bookRepository = bookRepository;
+         _bookCopyRepository = bookCopyRepository;
++        _unitOfWork = unitOfWork;
+     }
+ 
+     // Category methods
+@@ -88,6 +91,8 @@ public class CatalogService : ICatalogService
+         };
+ 
+         await _categoryRepository.AddAsync(category, cancellationToken);
++        // Persist first so the re-read below sees the saved row and its relations.
++        await _unitOfWork.SaveChangesAsync(cancellationToken);
+         return await GetCategoryByIdAsync(category.Id, cancellationToken) ?? throw new InvalidOperationException("Failed to create category");
+     }
+ 
+@@ -105,6 +110,8 @@ public class CatalogService : ICatalogService
+         category.UpdatedAt = DateTime.UtcNow;
+ 
+         await _categoryRepository.UpdateAsync(category, cancellationToken);
++        // Persist first so the re-read below sees the saved row and its relations.
++        await _unitOfWork.SaveChangesAsync(cancellationToken);
+         return await GetCategoryByIdAsync(id, cancellationToken);
+     }
+ 
+@@ -178,6 +185,8 @@ public class CatalogService : ICatalogService
+         };
+ 
+         await _publisherRepository.AddAsync(publisher, cancellationToken);
++        // Persist first so the re-read below sees the saved row and its relations.
++        await _unitOfWork.SaveChangesAsync(cancellationToken);
+         return await GetPublisherByIdAsync(publisher.Id, cancellationToken) ?? throw new InvalidOperationException("Failed to create publisher");
+     }
+ 
+@@ -196,6 +205,8 @@ public class CatalogService : ICatalogService
+         publisher.UpdatedAt = DateTime.UtcNow;
+ 
+         await _publisherRepository.UpdateAsync(publisher, cancellationToken);
++        // Persist first so the re-read below sees the saved row and its relations.
++        await _unitOfWork.SaveChangesAsync(cancellationToken);
+         return await GetPublisherByIdAsync(id, cancellationToken);
+     }
+ 
+@@ -269,6 +280,8 @@ public class CatalogService : ICatalogService
+         };
+ 
+         await _authorRepository.AddAsync(author, cancellationToken);
++        // Persist first so the re-read below sees the saved row and its relations.
++        await _unitOfWork.SaveChangesAsync(cancellationToken);
+         return await GetAuthorByIdAsync(author.Id, cancellationToken) ?? throw new InvalidOperationException("Failed to create author");
+     }
+ 
+@@ -287,6 +300,8 @@ public class CatalogService : ICatalogService
+         author.UpdatedAt = DateTime.UtcNow;
+ 
+         await _authorRepository.UpdateAsync(author, cancellationToken);
++        // Persist first so the re-read below sees the saved row and its relations.
++        await _unitOfWork.SaveChangesAsync(cancellationToken);
+         return await GetAuthorByIdAsync(id, cancellationToken);
+     }
+ 
+@@ -467,6 +482,8 @@ public class CatalogService : ICatalogService
+         }
+ 
+         await _bookRepository.AddAsync(book, cancellationToken);
++        // Persist first so the re-read below sees the saved row and its relations.
++        await _unitOfWork.SaveChangesAsync(cancellationToken);
+         return await GetBookByIdAsync(book.Id, cancellationToken) ?? throw new InvalidOperationException("Failed to create book");
+     }
+ 
+@@ -506,6 +523,8 @@ public class CatalogService : ICatalogService
+         }
+ 
+         await _bookRepository.UpdateAsync(book, cancellationToken);
++        // Persist first so the re-read below sees the saved row and its relations.
++        await _unitOfWork.SaveChangesAsync(cancellationToken);
+         return await GetBookByIdAsync(id, cancellationToken);
+     }
+ 
+@@ -625,6 +644,8 @@ public class CatalogService : ICatalogService
+         };
+ 
+         await _bookCopyRepository.AddAsync(bookCopy, cancellationToken);
++        // Persist first so the re-read below sees the saved row and its relations.
++        await _unitOfWork.SaveChangesAsync(cancellationToken);
+         return await GetBookCopyByIdAsync(bookCopy.Id, cancellationToken) ?? throw new InvalidOperationException("Failed to create book copy");
+     }
+ 
+@@ -648,6 +669,8 @@ public class CatalogService : ICatalogService
+         bookCopy.UpdatedAt = DateTime.UtcNow;
+ 
+         await _bookCopyRepository.UpdateAsync(bookCopy, cancellationToken);
++        // Persist first so the re-read below sees the saved row and its relations.
++        await _unitOfWork.SaveChangesAsync(cancellationToken);
+         return await GetBookCopyByIdAsync(id, cancellationToken);
+     }
+ 
+diff --git a/src/LMS.Application/Services/CirculationService.cs b/src/LMS.Application/Services/CirculationService.cs
+index c0948c6..7a4be28 100644
+--- a/src/LMS.Application/Services/CirculationService.cs
++++ b/src/LMS.Application/Services/CirculationService.cs
+@@ -7,6 +7,7 @@ namespace LMS.Application.Services;
+ 
+ public class CirculationService : ICirculationService
+ {
++    private readonly IUnitOfWork _unitOfWork;
+     private readonly ILoanRepository _loanRepository;
+     private readonly IBookCopyRepository _bookCopyRepository;
+     private readonly IMemberRepository _memberRepository;
+@@ -24,7 +25,8 @@ public class CirculationService : ICirculationService
+         IFineRepository fineRepository,
+         ISettingRepository settingRepository,
+         IBookRepository bookRepository,
+-        IPaymentRepository paymentRepository)
++        IPaymentRepository paymentRepository,
++        IUnitOfWork unitOfWork)
+     {
+         _loanRepository = loanRepository;
+         _bookCopyRepository = bookCopyRepository;
+@@ -34,6 +36,7 @@ public class CirculationService : ICirculationService
+         _settingRepository = settingRepository;
+         _bookRepository = bookRepository;
+         _paymentRepository = paymentRepository;
++        _unitOfWork = unitOfWork;
+     }
+ 
+     // Loans
+@@ -189,6 +192,10 @@ public class CirculationService : ICirculationService
+             await _reservationRepository.UpdateAsync(reservation, cancellationToken);
+         }
+ 
++        // Persist first so the re-read below sees the saved row and its relations.
++
++        await _unitOfWork.SaveChangesAsync(cancellationToken);
++
+         return await GetLoanByIdAsync(loan.Id, cancellationToken) ?? throw new InvalidOperationException("Failed to create loan");
+     }
+ 
+@@ -222,6 +229,10 @@ public class CirculationService : ICirculationService
+ 
+         await _loanRepository.UpdateAsync(loan, cancellationToken);
+ 
++        // Persist first so the re-read below sees the saved row and its relations.
++
++        await _unitOfWork.SaveChangesAsync(cancellationToken);
++
+         return await GetLoanByIdAsync(loan.Id, cancellationToken);
+     }
+ 
+@@ -264,6 +275,10 @@ public class CirculationService : ICirculationService
+             await CreateOverdueFineAsync(loan, null, cancellationToken);
+         }
+ 
++        // Persist first so the re-read below sees the saved row and its relations.
++
++        await _unitOfWork.SaveChangesAsync(cancellationToken);
++
+         return await GetLoanByIdAsync(request.LoanId, cancellationToken);
+     }
+ 
+@@ -410,6 +425,8 @@ public class CirculationService : ICirculationService
+             };
+ 
+             await _reservationRepository.AddAsync(reservation, cancellationToken);
++            // Persist first so the re-read below sees the saved row and its relations.
++            await _unitOfWork.SaveChangesAsync(cancellationToken);
+             return await GetReservationByIdAsync(reservation.Id, cancellationToken) ?? throw new InvalidOperationException("Failed to create reservation");
+         }
+         else
+@@ -436,6 +453,10 @@ public class CirculationService : ICirculationService
+             await _reservationRepository.AddAsync(reservation, cancellationToken);
+             await _bookCopyRepository.UpdateAsync(bookCopy, cancellationToken);
+ 
++            // Persist first so the re-read below sees the saved row and its relations.
++
++            await _unitOfWork.SaveChangesAsync(cancellationToken);
++
+             return await GetReservationByIdAsync(reservation.Id, cancellationToken) ?? throw new InvalidOperationException("Failed to create reservation");
+         }
+     }
+diff --git a/src/LMS.Application/Services/MemberService.cs b/src/LMS.Application/Services/MemberService.cs
+index dbac1dc..b474c28 100644
+--- a/src/LMS.Application/Services/MemberService.cs
++++ b/src/LMS.Application/Services/MemberService.cs
+@@ -7,6 +7,7 @@ namespace LMS.Application.Services;
+ 
+ public class MemberService : IMemberService
+ {
++    private readonly IUnitOfWork _unitOfWork;
+     private readonly IMemberRepository _memberRepository;
+     private readonly IMemberTypeRepository _memberTypeRepository;
+     private readonly IUserRepository _userRepository;
+@@ -18,13 +19,15 @@ public class MemberService : IMemberService
+         IMemberTypeRepository memberTypeRepository,
+         IUserRepository userRepository,
+         ILoanRepository loanRepository,
+-        IFineRepository fineRepository)
++        IFineRepository fineRepository,
++        IUnitOfWork unitOfWork)
+     {
+         _memberRepository = memberRepository;
+         _memberTypeRepository = memberTypeRepository;
+         _userRepository = userRepository;
+         _loanRepository = loanRepository;
+         _fineRepository = fineRepository;
++        _unitOfWork = unitOfWork;
+     }
+ 
+     public async Task<PaginatedResult<MemberDto>> GetAllAsync(PaginationRequest request, bool? isActive = null, Guid? memberTypeId = null, string? search = null, CancellationToken cancellationToken = default)
+@@ -187,6 +190,10 @@ public class MemberService : IMemberService
+ 
+         await _memberRepository.AddAsync(member, cancellationToken);
+ 
++        // Persist first so the re-read below sees the saved row and its relations.
++
++        await _unitOfWork.SaveChangesAsync(cancellationToken);
++
+         return await GetByIdAsync(member.Id, cancellationToken) ?? throw new InvalidOperationException("Failed to create member");
+     }
+ 
+@@ -213,6 +220,10 @@ public class MemberService : IMemberService
+         member.UpdatedAt = DateTime.UtcNow;
+         await _memberRepository.UpdateAsync(member, cancellationToken);
+ 
++        // Persist first so the re-read below sees the saved row and its relations.
++
++        await _unitOfWork.SaveChangesAsync(cancellationToken);
++
+         return await GetByIdAsync(id, cancellationToken);
+     }
+ 
+diff --git a/src/LMS.Infrastructure/Repositories/BookCopyRepository.cs b/src/LMS.Infrastructure/Repositories/BookCopyRepository.cs
+index cf4efdd..d6cebb3 100644
+--- a/src/LMS.Infrastructure/Repositories/BookCopyRepository.cs
++++ b/src/LMS.Infrastructure/Repositories/BookCopyRepository.cs
+@@ -11,6 +11,14 @@ public class BookCopyRepository : GenericRepository<BookCopy>, IBookCopyReposito
+ {
+     public BookCopyRepository(LibraryDbContext context) : base(context) { }
+ 
++    /// <summary>Loads the entity together with the relations the DTO mappers need (and applies the soft-delete filter).</summary>
++    public override async Task<BookCopy?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
++    {
++        return await _dbSet
++            .Include(x => x.Book)
++            .FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
++    }
++
+     public async Task<IEnumerable<BookCopy>> GetByBookIdAsync(Guid bookId, CancellationToken cancellationToken = default)
+     {
+         return await _dbSet.Where(bc => bc.BookId == bookId).ToListAsync(cancellationToken);
+diff --git a/src/LMS.Infrastructure/Repositories/BookRepository.cs b/src/LMS.Infrastructure/Repositories/BookRepository.cs
+index 3586322..d90a4c2 100644
+--- a/src/LMS.Infrastructure/Repositories/BookRepository.cs
++++ b/src/LMS.Infrastructure/Repositories/BookRepository.cs
+@@ -10,6 +10,17 @@ public class BookRepository : GenericRepository<Book>, IBookRepository
+ {
+     public BookRepository(LibraryDbContext context) : base(context) { }
+ 
++    /// <summary>Loads the entity together with the relations the DTO mappers need (and applies the soft-delete filter).</summary>
++    public override async Task<Book?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
++    {
++        return await _dbSet
++            .Include(x => x.Category)
++            .Include(x => x.Publisher)
++            .Include(x => x.BookAuthors).ThenInclude(ba => ba.Author)
++            .Include(x => x.BookCopies)
++            .FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
++    }
++
+     public async Task<Book?> GetByISBNAsync(string isbn, CancellationToken cancellationToken = default)
+     {
+         return await _dbSet.FirstOrDefaultAsync(b => b.ISBN == isbn, cancellationToken);
+diff --git a/src/LMS.Infrastructure/Repositories/CategoryRepository.cs b/src/LMS.Infrastructure/Repositories/CategoryRepository.cs
+index 541e562..7602ec4 100644
+--- a/src/LMS.Infrastructure/Repositories/CategoryRepository.cs
++++ b/src/LMS.Infrastructure/Repositories/CategoryRepository.cs
+@@ -9,6 +9,14 @@ public class CategoryRepository : GenericRepository<Category>, ICategoryReposito
+ {
+     public CategoryRepository(LibraryDbContext context) : base(context) { }
+ 
++    /// <summary>Loads the entity together with the relations the DTO mappers need (and applies the soft-delete filter).</summary>
++    public override async Task<Category?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
++    {
++        return await _dbSet
++            .Include(x => x.ParentCategory)
++            .FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
++    }
++
+     public async Task<Category?> GetByNameAsync(string name, CancellationToken cancellationToken = default)
+     {
+         return await _dbSet.FirstOrDefaultAsync(c => c.Name == name, cancellationToken);
+diff --git a/src/LMS.Infrastructure/Repositories/FineRepository.cs b/src/LMS.Infrastructure/Repositories/FineRepository.cs
+index 92161b7..4038a67 100644
+--- a/src/LMS.Infrastructure/Repositories/FineRepository.cs
++++ b/src/LMS.Infrastructure/Repositories/FineRepository.cs
+@@ -11,6 +11,15 @@ public class FineRepository : GenericRepository<Fine>, IFineRepository
+ {
+     public FineRepository(LibraryDbContext context) : base(context) { }
+ 
++    /// <summary>Loads the entity together with the relations the DTO mappers need (and applies the soft-delete filter).</summary>
++    public override async Task<Fine?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
++    {
++        return await _dbSet
++            .Include(x => x.Member).ThenInclude(m => m.User)
++            .Include(x => x.Loan).ThenInclude(l => l.BookCopy).ThenInclude(bc => bc.Book)
++            .FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
++    }
++
+     public async Task<PaginatedResult<Fine>> GetPagedAsync(PaginationRequest request, Guid? memberId = null, FineStatus? status = null, CancellationToken cancellationToken = default)
+     {
+         var query = _dbSet
+diff --git a/src/LMS.Infrastructure/Repositories/LoanRepository.cs b/src/LMS.Infrastructure/Repositories/LoanRepository.cs
+index 476fdfe..6ccdfe0 100644
+--- a/src/LMS.Infrastructure/Repositories/LoanRepository.cs
++++ b/src/LMS.Infrastructure/Repositories/LoanRepository.cs
+@@ -11,6 +11,17 @@ public class LoanRepository : GenericRepository<Loan>, ILoanRepository
+ {
+     public LoanRepository(LibraryDbContext context) : base(context) { }
+ 
++    /// <summary>Loads the entity together with the relations the DTO mappers need (and applies the soft-delete filter).</summary>
++    public override async Task<Loan?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
++    {
++        return await _dbSet
++            .Include(x => x.BookCopy).ThenInclude(bc => bc.Book)
++            .Include(x => x.Member).ThenInclude(m => m.User)
++            .Include(x => x.IssuedBy)
++            .Include(x => x.ReturnedByUser)
++            .FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
++    }
++
+     public async Task<PaginatedResult<Loan>> GetPagedAsync(PaginationRequest request, Guid? memberId = null, Guid? bookCopyId = null, LoanStatus? status = null, bool? isOverdue = null, CancellationToken cancellationToken = default)
+     {
+         var query = _dbSet
+diff --git a/src/LMS.Infrastructure/Repositories/MemberRepository.cs b/src/LMS.Infrastructure/Repositories/MemberRepository.cs
+index 1fff296..1d76db8 100644
+--- a/src/LMS.Infrastructure/Repositories/MemberRepository.cs
++++ b/src/LMS.Infrastructure/Repositories/MemberRepository.cs
+@@ -11,6 +11,15 @@ public class MemberRepository : GenericRepository<Member>, IMemberRepository
+ {
+     public MemberRepository(LibraryDbContext context) : base(context) { }
+ 
++    /// <summary>Loads the entity together with the relations the DTO mappers need (and applies the soft-delete filter).</summary>
++    public override async Task<Member?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
++    {
++        return await _dbSet
++            .Include(x => x.User)
++            .Include(x => x.MemberType)
++            .FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
++    }
++
+     public async Task<Member?> GetByMemberNumberAsync(string memberNumber, CancellationToken cancellationToken = default)
+     {
+         return await _dbSet
+diff --git a/src/LMS.Infrastructure/Repositories/NotificationRepository.cs b/src/LMS.Infrastructure/Repositories/NotificationRepository.cs
+index 91ba171..2fe1083 100644
+--- a/src/LMS.Infrastructure/Repositories/NotificationRepository.cs
++++ b/src/LMS.Infrastructure/Repositories/NotificationRepository.cs
+@@ -10,6 +10,14 @@ public class NotificationRepository : GenericRepository<Notification>, INotifica
+ {
+     public NotificationRepository(LibraryDbContext context) : base(context) { }
+ 
++    /// <summary>Loads the entity together with the relations the DTO mappers need (and applies the soft-delete filter).</summary>
++    public override async Task<Notification?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
++    {
++        return await _dbSet
++            .Include(x => x.User)
++            .FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
++    }
++
+     public async Task<PaginatedResult<Notification>> GetPagedAsync(PaginationRequest request, Guid? userId = null, bool? isRead = null, CancellationToken cancellationToken = default)
+     {
+         var query = _dbSet
+diff --git a/src/LMS.Infrastructure/Repositories/PaymentRepository.cs b/src/LMS.Infrastructure/Repositories/PaymentRepository.cs
+index 8ff4a43..be57520 100644
+--- a/src/LMS.Infrastructure/Repositories/PaymentRepository.cs
++++ b/src/LMS.Infrastructure/Repositories/PaymentRepository.cs
+@@ -10,6 +10,15 @@ public class PaymentRepository : GenericRepository<Payment>, IPaymentRepository
+ {
+     public PaymentRepository(LibraryDbContext context) : base(context) { }
+ 
++    /// <summary>Loads the entity together with the relations the DTO mappers need (and applies the soft-delete filter).</summary>
++    public override async Task<Payment?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
++    {
++        return await _dbSet
++            .Include(x => x.Fine).ThenInclude(f => f.Member).ThenInclude(m => m.User)
++            .Include(x => x.ReceivedBy)
++            .FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
++    }
++
+     public async Task<PaginatedResult<Payment>> GetPagedAsync(PaginationRequest request, Guid? fineId = null, DateTime? fromDate = null, DateTime? toDate = null, CancellationToken cancellationToken = default)
+     {
+         var query = _dbSet
+diff --git a/src/LMS.Infrastructure/Repositories/ReservationRepository.cs b/src/LMS.Infrastructure/Repositories/ReservationRepository.cs
+index ca62615..ed4ec90 100644
+--- a/src/LMS.Infrastructure/Repositories/ReservationRepository.cs
++++ b/src/LMS.Infrastructure/Repositories/ReservationRepository.cs
+@@ -11,6 +11,16 @@ public class ReservationRepository : GenericRepository<Reservation>, IReservatio
+ {
+     public ReservationRepository(LibraryDbContext context) : base(context) { }
+ 
++    /// <summary>Loads the entity together with the relations the DTO mappers need (and applies the soft-delete filter).</summary>
++    public override async Task<Reservation?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
++    {
++        return await _dbSet
++            .Include(x => x.Book)
++            .Include(x => x.Member).ThenInclude(m => m.User)
++            .Include(x => x.BookCopy)
++            .FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
++    }
++
+     public async Task<PaginatedResult<Reservation>> GetPagedAsync(PaginationRequest request, Guid? memberId = null, Guid? bookId = null, ReservationStatus? status = null, CancellationToken cancellationToken = default)
+     {
+         var query = _dbSet

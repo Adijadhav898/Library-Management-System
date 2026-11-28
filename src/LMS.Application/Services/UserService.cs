@@ -2,7 +2,6 @@ using LMS.Application.DTOs;
 using LMS.Application.Interfaces;
 using LMS.Domain.Entities;
 using LMS.Domain.Enums;
-using Microsoft.AspNetCore.Identity;
 
 namespace LMS.Application.Services;
 
@@ -10,7 +9,6 @@ public class UserService : IUserService
 {
     private readonly IUserRepository _userRepository;
     private readonly IRoleRepository _roleRepository;
-    private readonly PasswordHasher<User> _passwordHasher;
 
     public UserService(
         IUserRepository userRepository,
@@ -18,7 +16,6 @@ public class UserService : IUserService
     {
         _userRepository = userRepository;
         _roleRepository = roleRepository;
-        _passwordHasher = new PasswordHasher<User>();
     }
 
     public async Task<PaginatedResult<UserDto>> GetAllAsync(PaginationRequest request, string? search = null, Guid? roleId = null, bool? isActive = null, CancellationToken cancellationToken = default)
@@ -61,7 +58,7 @@ public class UserService : IUserService
         {
             Id = Guid.NewGuid(),
             Email = request.Email,
-            PasswordHash = _passwordHasher.HashPassword(null!, request.Password),
+            PasswordHash = BCrypt.Net.BCrypt.HashPassword(request.Password),
             FirstName = request.FirstName,
             LastName = request.LastName,
             PhoneNumber = request.PhoneNumber,

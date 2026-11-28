@@ -33,6 +33,7 @@ public class NotificationJob
                 await notificationService.SendOverdueNotificationAsync(loan.Id);
             }
 
+            await scope.ServiceProvider.GetRequiredService<IUnitOfWork>().SaveChangesAsync();
             _logger.LogInformation("Overdue notifications sent successfully");
         }
         catch (Exception ex)

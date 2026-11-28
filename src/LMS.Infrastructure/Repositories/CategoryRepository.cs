@@ -9,6 +9,14 @@ public class CategoryRepository : GenericRepository<Category>, ICategoryReposito
 {
     public CategoryRepository(LibraryDbContext context) : base(context) { }
 
+    /// <summary>Loads the entity together with the relations the DTO mappers need (and applies the soft-delete filter).</summary>
+    public override async Task<Category?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        return await _dbSet
+            .Include(x => x.ParentCategory)
+            .FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
+    }
+
     public async Task<Category?> GetByNameAsync(string name, CancellationToken cancellationToken = default)
     {
         return await _dbSet.FirstOrDefaultAsync(c => c.Name == name, cancellationToken);

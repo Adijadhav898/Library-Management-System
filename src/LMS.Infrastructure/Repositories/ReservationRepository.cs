@@ -11,6 +11,16 @@ public class ReservationRepository : GenericRepository<Reservation>, IReservatio
 {
     public ReservationRepository(LibraryDbContext context) : base(context) { }
 
+    /// <summary>Loads the entity together with the relations the DTO mappers need (and applies the soft-delete filter).</summary>
+    public override async Task<Reservation?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        return await _dbSet
+            .Include(x => x.Book)
+            .Include(x => x.Member).ThenInclude(m => m.User)
+            .Include(x => x.BookCopy)
+            .FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
+    }
+
     public async Task<PaginatedResult<Reservation>> GetPagedAsync(PaginationRequest request, Guid? memberId = null, Guid? bookId = null, ReservationStatus? status = null, CancellationToken cancellationToken = default)
     {
         var query = _dbSet

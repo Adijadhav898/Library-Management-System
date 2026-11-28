@@ -11,6 +11,14 @@ public class BookCopyRepository : GenericRepository<BookCopy>, IBookCopyReposito
 {
     public BookCopyRepository(LibraryDbContext context) : base(context) { }
 
+    /// <summary>Loads the entity together with the relations the DTO mappers need (and applies the soft-delete filter).</summary>
+    public override async Task<BookCopy?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        return await _dbSet
+            .Include(x => x.Book)
+            .FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
+    }
+
     public async Task<IEnumerable<BookCopy>> GetByBookIdAsync(Guid bookId, CancellationToken cancellationToken = default)
     {
         return await _dbSet.Where(bc => bc.BookId == bookId).ToListAsync(cancellationToken);

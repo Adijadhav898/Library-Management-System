@@ -1,0 +1,26 @@
+diff --git a/src/LMS.API/Middleware/ExceptionHandlingMiddleware.cs b/src/LMS.API/Middleware/ExceptionHandlingMiddleware.cs
+index f7ef840..f7f15c6 100644
+--- a/src/LMS.API/Middleware/ExceptionHandlingMiddleware.cs
++++ b/src/LMS.API/Middleware/ExceptionHandlingMiddleware.cs
+@@ -1,6 +1,7 @@
+ using System.Net;
+ using System.Text.Json;
+ using Microsoft.AspNetCore.Http;
++using Microsoft.EntityFrameworkCore;
+ using Microsoft.Extensions.Logging;
+ 
+ namespace LMS.API.Middleware;
+@@ -41,6 +42,13 @@ public class ExceptionHandlingMiddleware
+ 
+         switch (exception)
+         {
++            case DbUpdateException dbEx when dbEx.InnerException?.Message.Contains("duplicate key", StringComparison.OrdinalIgnoreCase) == true:
++                response.StatusCode = (int)HttpStatusCode.Conflict;
++                response.Message = "Duplicate value";
++                response.Details = "A record with the same unique value (e.g. name, ISBN, email) already exists.";
++                context.Response.StatusCode = (int)HttpStatusCode.Conflict;
++                break;
++
+             case ArgumentNullException argNullEx:
+                 response.StatusCode = (int)HttpStatusCode.BadRequest;
+                 response.Message = "Invalid request";

@@ -27,6 +27,7 @@ public class OverdueFineJob
         try
         {
             await circulationService.ProcessOverdueLoansAsync();
+            await scope.ServiceProvider.GetRequiredService<IUnitOfWork>().SaveChangesAsync();
             _logger.LogInformation("Overdue loans processing completed successfully");
         }
         catch (Exception ex)
@@ -47,6 +48,7 @@ public class OverdueFineJob
         try
         {
             await circulationService.ProcessExpiredReservationsAsync();
+            await scope.ServiceProvider.GetRequiredService<IUnitOfWork>().SaveChangesAsync();
             _logger.LogInformation("Expired reservations processing completed successfully");
         }
         catch (Exception ex)

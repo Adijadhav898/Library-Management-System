@@ -7,6 +7,7 @@ namespace LMS.Application.Services;
 
 public class CirculationService : ICirculationService
 {
+    private readonly IUnitOfWork _unitOfWork;
     private readonly ILoanRepository _loanRepository;
     private readonly IBookCopyRepository _bookCopyRepository;
     private readonly IMemberRepository _memberRepository;
@@ -24,7 +25,8 @@ public class CirculationService : ICirculationService
         IFineRepository fineRepository,
         ISettingRepository settingRepository,
         IBookRepository bookRepository,
-        IPaymentRepository paymentRepository)
+        IPaymentRepository paymentRepository,
+        IUnitOfWork unitOfWork)
     {
         _loanRepository = loanRepository;
         _bookCopyRepository = bookCopyRepository;
@@ -34,6 +36,7 @@ public class CirculationService : ICirculationService
         _settingRepository = settingRepository;
         _bookRepository = bookRepository;
         _paymentRepository = paymentRepository;
+        _unitOfWork = unitOfWork;
     }
 
     // Loans
@@ -189,6 +192,10 @@ public class CirculationService : ICirculationService
             await _reservationRepository.UpdateAsync(reservation, cancellationToken);
         }
 
+        // Persist first so the re-read below sees the saved row and its relations.
+
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
         return await GetLoanByIdAsync(loan.Id, cancellationToken) ?? throw new InvalidOperationException("Failed to create loan");
     }
 
@@ -221,6 +228,10 @@ public class CirculationService : ICirculationService
         loan.UpdatedAt = DateTime.UtcNow;
 
         await _loanRepository.UpdateAsync(loan, cancellationToken);
+
+        // Persist first so the re-read below sees the saved row and its relations.
+
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         return await GetLoanByIdAsync(loan.Id, cancellationToken);
     }
@@ -263,6 +274,10 @@ public class CirculationService : ICirculationService
         {
             await CreateOverdueFineAsync(loan, null, cancellationToken);
         }
+
+        // Persist first so the re-read below sees the saved row and its relations.
+
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         return await GetLoanByIdAsync(request.LoanId, cancellationToken);
     }
@@ -410,6 +425,8 @@ public class CirculationService : ICirculationService
             };
 
             await _reservationRepository.AddAsync(reservation, cancellationToken);
+            // Persist first so the re-read below sees the saved row and its relations.
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
             return await GetReservationByIdAsync(reservation.Id, cancellationToken) ?? throw new InvalidOperationException("Failed to create reservation");
         }
         else
@@ -435,6 +452,10 @@ public class CirculationService : ICirculationService
 
             await _reservationRepository.AddAsync(reservation, cancellationToken);
             await _bookCopyRepository.UpdateAsync(bookCopy, cancellationToken);
+
+            // Persist first so the re-read below sees the saved row and its relations.
+
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
 
             return await GetReservationByIdAsync(reservation.Id, cancellationToken) ?? throw new InvalidOperationException("Failed to create reservation");
         }

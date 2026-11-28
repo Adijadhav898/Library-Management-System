@@ -10,6 +10,17 @@ public class BookRepository : GenericRepository<Book>, IBookRepository
 {
     public BookRepository(LibraryDbContext context) : base(context) { }
 
+    /// <summary>Loads the entity together with the relations the DTO mappers need (and applies the soft-delete filter).</summary>
+    public override async Task<Book?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        return await _dbSet
+            .Include(x => x.Category)
+            .Include(x => x.Publisher)
+            .Include(x => x.BookAuthors).ThenInclude(ba => ba.Author)
+            .Include(x => x.BookCopies)
+            .FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
+    }
+
     public async Task<Book?> GetByISBNAsync(string isbn, CancellationToken cancellationToken = default)
     {
         return await _dbSet.FirstOrDefaultAsync(b => b.ISBN == isbn, cancellationToken);

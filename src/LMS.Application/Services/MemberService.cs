@@ -7,6 +7,7 @@ namespace LMS.Application.Services;
 
 public class MemberService : IMemberService
 {
+    private readonly IUnitOfWork _unitOfWork;
     private readonly IMemberRepository _memberRepository;
     private readonly IMemberTypeRepository _memberTypeRepository;
     private readonly IUserRepository _userRepository;
@@ -18,13 +19,15 @@ public class MemberService : IMemberService
         IMemberTypeRepository memberTypeRepository,
         IUserRepository userRepository,
         ILoanRepository loanRepository,
-        IFineRepository fineRepository)
+        IFineRepository fineRepository,
+        IUnitOfWork unitOfWork)
     {
         _memberRepository = memberRepository;
         _memberTypeRepository = memberTypeRepository;
         _userRepository = userRepository;
         _loanRepository = loanRepository;
         _fineRepository = fineRepository;
+        _unitOfWork = unitOfWork;
     }
 
     public async Task<PaginatedResult<MemberDto>> GetAllAsync(PaginationRequest request, bool? isActive = null, Guid? memberTypeId = null, string? search = null, CancellationToken cancellationToken = default)
@@ -187,6 +190,10 @@ public class MemberService : IMemberService
 
         await _memberRepository.AddAsync(member, cancellationToken);
 
+        // Persist first so the re-read below sees the saved row and its relations.
+
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
         return await GetByIdAsync(member.Id, cancellationToken) ?? throw new InvalidOperationException("Failed to create member");
     }
 
@@ -212,6 +219,10 @@ public class MemberService : IMemberService
 
         member.UpdatedAt = DateTime.UtcNow;
         await _memberRepository.UpdateAsync(member, cancellationToken);
+
+        // Persist first so the re-read below sees the saved row and its relations.
+
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         return await GetByIdAsync(id, cancellationToken);
     }

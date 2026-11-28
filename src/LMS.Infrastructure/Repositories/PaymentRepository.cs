@@ -10,6 +10,15 @@ public class PaymentRepository : GenericRepository<Payment>, IPaymentRepository
 {
     public PaymentRepository(LibraryDbContext context) : base(context) { }
 
+    /// <summary>Loads the entity together with the relations the DTO mappers need (and applies the soft-delete filter).</summary>
+    public override async Task<Payment?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        return await _dbSet
+            .Include(x => x.Fine).ThenInclude(f => f.Member).ThenInclude(m => m.User)
+            .Include(x => x.ReceivedBy)
+            .FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
+    }
+
     public async Task<PaginatedResult<Payment>> GetPagedAsync(PaginationRequest request, Guid? fineId = null, DateTime? fromDate = null, DateTime? toDate = null, CancellationToken cancellationToken = default)
     {
         var query = _dbSet

@@ -3,7 +3,6 @@ using LMS.Application.DTOs;
 using LMS.Application.Interfaces;
 using LMS.Domain.Entities;
 using LMS.Domain.Enums;
-using Microsoft.AspNetCore.Identity;
 
 namespace LMS.Application.Services;
 
@@ -13,7 +12,6 @@ public class AuthService : IAuthService
     private readonly IRefreshTokenRepository _refreshTokenRepository;
     private readonly IRoleRepository _roleRepository;
     private readonly ITokenService _tokenService;
-    private readonly PasswordHasher<User> _passwordHasher;
 
     public AuthService(
         IUserRepository userRepository,
@@ -25,7 +23,6 @@ public class AuthService : IAuthService
         _refreshTokenRepository = refreshTokenRepository;
         _roleRepository = roleRepository;
         _tokenService = tokenService;
-        _passwordHasher = new PasswordHasher<User>();
     }
 
     public async Task<LoginResponse?> LoginAsync(LoginRequest request, CancellationToken cancellationToken = default)
@@ -34,8 +31,7 @@ public class AuthService : IAuthService
         if (user == null || user.IsDeleted)
             return null;
 
-        var result = _passwordHasher.VerifyHashedPassword(user, user.PasswordHash, request.Password);
-        if (result == PasswordVerificationResult.Failed)
+        if (!BCrypt.Net.BCrypt.Verify(request.Password, user.PasswordHash))
             return null;
 
         var roles = (await _userRepository.GetRolesAsync(user.Id, cancellationToken)).Select(r => r.Name).ToList();
@@ -87,7 +83,7 @@ public class AuthService : IAuthService
         {
             Id = Guid.NewGuid(),
             Email = request.Email,
-            PasswordHash = _passwordHasher.HashPassword(null!, request.Password),
+            PasswordHash = BCrypt.Net.BCrypt.HashPassword(request.Password),
             FirstName = request.FirstName,
             LastName = request.LastName,
             IsActive = true,
@@ -192,11 +188,10 @@ public class AuthService : IAuthService
         if (user == null)
             return false;
 
-        var result = _passwordHasher.VerifyHashedPassword(user, user.PasswordHash, request.CurrentPassword);
-        if (result == PasswordVerificationResult.Failed)
+        if (!BCrypt.Net.BCrypt.Verify(request.CurrentPassword, user.PasswordHash))
             return false;
 
-        user.PasswordHash = _passwordHasher.HashPassword(user, request.NewPassword);
+        user.PasswordHash = BCrypt.Net.BCrypt.HashPassword(request.NewPassword);
         user.UpdatedAt = DateTime.UtcNow;
 
         // Revoke all refresh tokens on password change

@@ -7,6 +7,7 @@ namespace LMS.Application.Services;
 
 public class CatalogService : ICatalogService
 {
+    private readonly IUnitOfWork _unitOfWork;
     private readonly ICategoryRepository _categoryRepository;
     private readonly IPublisherRepository _publisherRepository;
     private readonly IAuthorRepository _authorRepository;
@@ -18,13 +19,15 @@ public class CatalogService : ICatalogService
         IPublisherRepository publisherRepository,
         IAuthorRepository authorRepository,
         IBookRepository bookRepository,
-        IBookCopyRepository bookCopyRepository)
+        IBookCopyRepository bookCopyRepository,
+        IUnitOfWork unitOfWork)
     {
         _categoryRepository = categoryRepository;
         _publisherRepository = publisherRepository;
         _authorRepository = authorRepository;
         _bookRepository = bookRepository;
         _bookCopyRepository = bookCopyRepository;
+        _unitOfWork = unitOfWork;
     }
 
     // Category methods
@@ -88,6 +91,8 @@ public class CatalogService : ICatalogService
         };
 
         await _categoryRepository.AddAsync(category, cancellationToken);
+        // Persist first so the re-read below sees the saved row and its relations.
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
         return await GetCategoryByIdAsync(category.Id, cancellationToken) ?? throw new InvalidOperationException("Failed to create category");
     }
 
@@ -105,6 +110,8 @@ public class CatalogService : ICatalogService
         category.UpdatedAt = DateTime.UtcNow;
 
         await _categoryRepository.UpdateAsync(category, cancellationToken);
+        // Persist first so the re-read below sees the saved row and its relations.
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
         return await GetCategoryByIdAsync(id, cancellationToken);
     }
 
@@ -178,6 +185,8 @@ public class CatalogService : ICatalogService
         };
 
         await _publisherRepository.AddAsync(publisher, cancellationToken);
+        // Persist first so the re-read below sees the saved row and its relations.
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
         return await GetPublisherByIdAsync(publisher.Id, cancellationToken) ?? throw new InvalidOperationException("Failed to create publisher");
     }
 
@@ -196,6 +205,8 @@ public class CatalogService : ICatalogService
         publisher.UpdatedAt = DateTime.UtcNow;
 
         await _publisherRepository.UpdateAsync(publisher, cancellationToken);
+        // Persist first so the re-read below sees the saved row and its relations.
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
         return await GetPublisherByIdAsync(id, cancellationToken);
     }
 
@@ -269,6 +280,8 @@ public class CatalogService : ICatalogService
         };
 
         await _authorRepository.AddAsync(author, cancellationToken);
+        // Persist first so the re-read below sees the saved row and its relations.
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
         return await GetAuthorByIdAsync(author.Id, cancellationToken) ?? throw new InvalidOperationException("Failed to create author");
     }
 
@@ -287,6 +300,8 @@ public class CatalogService : ICatalogService
         author.UpdatedAt = DateTime.UtcNow;
 
         await _authorRepository.UpdateAsync(author, cancellationToken);
+        // Persist first so the re-read below sees the saved row and its relations.
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
         return await GetAuthorByIdAsync(id, cancellationToken);
     }
 
@@ -467,6 +482,8 @@ public class CatalogService : ICatalogService
         }
 
         await _bookRepository.AddAsync(book, cancellationToken);
+        // Persist first so the re-read below sees the saved row and its relations.
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
         return await GetBookByIdAsync(book.Id, cancellationToken) ?? throw new InvalidOperationException("Failed to create book");
     }
 
@@ -506,6 +523,8 @@ public class CatalogService : ICatalogService
         }
 
         await _bookRepository.UpdateAsync(book, cancellationToken);
+        // Persist first so the re-read below sees the saved row and its relations.
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
         return await GetBookByIdAsync(id, cancellationToken);
     }
 
@@ -625,6 +644,8 @@ public class CatalogService : ICatalogService
         };
 
         await _bookCopyRepository.AddAsync(bookCopy, cancellationToken);
+        // Persist first so the re-read below sees the saved row and its relations.
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
         return await GetBookCopyByIdAsync(bookCopy.Id, cancellationToken) ?? throw new InvalidOperationException("Failed to create book copy");
     }
 
@@ -648,6 +669,8 @@ public class CatalogService : ICatalogService
         bookCopy.UpdatedAt = DateTime.UtcNow;
 
         await _bookCopyRepository.UpdateAsync(bookCopy, cancellationToken);
+        // Persist first so the re-read below sees the saved row and its relations.
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
         return await GetBookCopyByIdAsync(id, cancellationToken);
     }
 

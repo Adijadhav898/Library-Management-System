@@ -62,6 +62,15 @@ public class LibraryDbContext : DbContext
         modelBuilder.ApplyConfiguration(new SettingConfiguration());
         modelBuilder.ApplyConfiguration(new AuditLogConfiguration());
 
+        // IDs are generated in code (BaseEntity.Id = Guid.NewGuid()). Telling EF the key is NOT
+        // database-generated makes new entities added via navigations (e.g. user.RefreshTokens.Add)
+        // be inserted (Added) instead of being treated as existing rows (Modified -> concurrency error).
+        foreach (var entityType in modelBuilder.Model.GetEntityTypes()
+                     .Where(t => typeof(BaseEntity).IsAssignableFrom(t.ClrType)))
+        {
+            modelBuilder.Entity(entityType.ClrType).Property(nameof(BaseEntity.Id)).ValueGeneratedNever();
+        }
+
         // Global query filters for soft delete
         modelBuilder.Entity<User>().HasQueryFilter(u => !u.IsDeleted);
         modelBuilder.Entity<Member>().HasQueryFilter(m => !m.IsDeleted);
