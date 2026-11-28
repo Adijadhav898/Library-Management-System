@@ -36,10 +36,12 @@ public static class DbSeeder
                 LastName = "Administrator",
                 PhoneNumber = "+1234567890",
                 IsActive = true,
-                EmailConfirmed = true,
-                RoleId = adminRole.Id
+                EmailConfirmed = true
             };
             await context.Users.AddAsync(adminUser);
+            await context.SaveChangesAsync();
+
+            await context.UserRoles.AddAsync(new UserRole { UserId = adminUser.Id, RoleId = adminRole.Id });
             await context.SaveChangesAsync();
         }
 
@@ -51,30 +53,27 @@ public static class DbSeeder
                 new MemberType
                 {
                     Name = "Student",
-                    Description = "Student member type",
                     MaxBooksAllowed = 3,
-                    LoanDurationDays = 14,
-                    MaxRenewalsAllowed = 2,
+                    LoanDays = 14,
+                    MaxRenewals = 2,
                     FinePerDay = 1.00m,
                     ReservationExpiryHours = 48
                 },
                 new MemberType
                 {
                     Name = "Faculty",
-                    Description = "Faculty member type",
                     MaxBooksAllowed = 10,
-                    LoanDurationDays = 30,
-                    MaxRenewalsAllowed = 3,
+                    LoanDays = 30,
+                    MaxRenewals = 3,
                     FinePerDay = 0.50m,
                     ReservationExpiryHours = 72
                 },
                 new MemberType
                 {
                     Name = "General",
-                    Description = "General public member type",
                     MaxBooksAllowed = 2,
-                    LoanDurationDays = 14,
-                    MaxRenewalsAllowed = 1,
+                    LoanDays = 14,
+                    MaxRenewals = 1,
                     FinePerDay = 2.00m,
                     ReservationExpiryHours = 24
                 }
@@ -151,9 +150,9 @@ public static class DbSeeder
         {
             var authors = new List<Author>
             {
-                new Author { FirstName = "Robert", LastName = "Martin", Biography = "Known as Uncle Bob, software engineering expert", BirthDate = new DateTime(1952, 12, 5) },
-                new Author { FirstName = "Martin", LastName = "Fowler", Biography = "Author of Patterns of Enterprise Application Architecture", BirthDate = new DateTime(1963, 1, 18) },
-                new Author { FirstName = "Eric", LastName = "Evans", Biography = "Author of Domain-Driven Design", BirthDate = new DateTime(1962, 1, 1) },
+                new Author { FirstName = "Robert", LastName = "Martin", Biography = "Known as Uncle Bob, software engineering expert", DateOfBirth = new DateTime(1952, 12, 5) },
+                new Author { FirstName = "Martin", LastName = "Fowler", Biography = "Author of Patterns of Enterprise Application Architecture", DateOfBirth = new DateTime(1963, 1, 18) },
+                new Author { FirstName = "Eric", LastName = "Evans", Biography = "Author of Domain-Driven Design", DateOfBirth = new DateTime(1962, 1, 1) },
                 new Author { FirstName = "Andrew", LastName = "Hunt", Biography = "Co-author of The Pragmatic Programmer" },
                 new Author { FirstName = "David", LastName = "Thomas", Biography = "Co-author of The Pragmatic Programmer" },
                 new Author { FirstName = "Kent", LastName = "Beck", Biography = "Creator of Extreme Programming and Test-Driven Development" },

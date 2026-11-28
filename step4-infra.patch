@@ -1,0 +1,1081 @@
+diff --git a/src/LMS.Application/Interfaces/IFileStorageService.cs b/src/LMS.Application/Interfaces/IFileStorageService.cs
+new file mode 100644
+index 0000000..7dd9592
+--- /dev/null
++++ b/src/LMS.Application/Interfaces/IFileStorageService.cs
+@@ -0,0 +1,11 @@
++using Microsoft.AspNetCore.Http;
++
++namespace LMS.Application.Interfaces;
++
++public interface IFileStorageService
++{
++    Task<string> SaveFileAsync(IFormFile file, string folder, CancellationToken cancellationToken = default);
++    Task<bool> DeleteFileAsync(string fileUrl, CancellationToken cancellationToken = default);
++    Task<byte[]?> GetFileAsync(string fileUrl, CancellationToken cancellationToken = default);
++    string GetFileUrl(string relativePath);
++}
+diff --git a/src/LMS.Infrastructure/Data/Configurations/AuditLogConfiguration.cs b/src/LMS.Infrastructure/Data/Configurations/AuditLogConfiguration.cs
+index 6fdfde1..f1c57f0 100644
+--- a/src/LMS.Infrastructure/Data/Configurations/AuditLogConfiguration.cs
++++ b/src/LMS.Infrastructure/Data/Configurations/AuditLogConfiguration.cs
+@@ -12,7 +12,6 @@ public class AuditLogConfiguration : IEntityTypeConfiguration<AuditLog>
+         builder.HasKey(a => a.Id);
+ 
+         builder.Property(a => a.EntityName).IsRequired().HasMaxLength(100);
+-        builder.Property(a => a.EntityId).IsRequired().HasMaxLength(50);
+         builder.Property(a => a.Action).IsRequired().HasMaxLength(50);
+         builder.Property(a => a.OldValues).HasMaxLength(4000);
+         builder.Property(a => a.NewValues).HasMaxLength(4000);
+diff --git a/src/LMS.Infrastructure/Data/Configurations/RoleConfiguration.cs b/src/LMS.Infrastructure/Data/Configurations/RoleConfiguration.cs
+index e22d314..dc6c6f0 100644
+--- a/src/LMS.Infrastructure/Data/Configurations/RoleConfiguration.cs
++++ b/src/LMS.Infrastructure/Data/Configurations/RoleConfiguration.cs
+@@ -15,5 +15,8 @@ public class RoleConfiguration : IEntityTypeConfiguration<Role>
+         builder.Property(r => r.Description).HasMaxLength(500);
+ 
+         builder.HasIndex(r => r.Name).IsUnique();
++
++        // Users are reached through the UserRole join entity
++        builder.Ignore(r => r.Users);
+     }
+ }
+\ No newline at end of file
+diff --git a/src/LMS.Infrastructure/Data/Configurations/UserConfiguration.cs b/src/LMS.Infrastructure/Data/Configurations/UserConfiguration.cs
+index 4fc95bd..68a7200 100644
+--- a/src/LMS.Infrastructure/Data/Configurations/UserConfiguration.cs
++++ b/src/LMS.Infrastructure/Data/Configurations/UserConfiguration.cs
+@@ -11,19 +11,14 @@ public class UserConfiguration : IEntityTypeConfiguration<User>
+         builder.ToTable("Users");
+         builder.HasKey(u => u.Id);
+ 
+-        builder.Property(u => u.FullName).IsRequired().HasMaxLength(200);
++        builder.Property(u => u.FirstName).IsRequired().HasMaxLength(100);
++        builder.Property(u => u.LastName).IsRequired().HasMaxLength(100);
+         builder.Property(u => u.Email).IsRequired().HasMaxLength(256);
+         builder.Property(u => u.PasswordHash).IsRequired().HasMaxLength(500);
+         builder.Property(u => u.PhoneNumber).HasMaxLength(20);
+         builder.Property(u => u.IsActive).HasDefaultValue(true);
+ 
+         builder.HasIndex(u => u.Email).IsUnique();
+-        builder.HasIndex(u => u.RoleId);
+-
+-        builder.HasOne(u => u.Role)
+-            .WithMany(r => r.Users)
+-            .HasForeignKey(u => u.RoleId)
+-            .OnDelete(DeleteBehavior.Restrict);
+ 
+         builder.HasOne(u => u.Member)
+             .WithOne(m => m.User)
+diff --git a/src/LMS.Infrastructure/Data/Configurations/UserRoleConfiguration.cs b/src/LMS.Infrastructure/Data/Configurations/UserRoleConfiguration.cs
+new file mode 100644
+index 0000000..90df554
+--- /dev/null
++++ b/src/LMS.Infrastructure/Data/Configurations/UserRoleConfiguration.cs
+@@ -0,0 +1,26 @@
++using Microsoft.EntityFrameworkCore;
++using Microsoft.EntityFrameworkCore.Metadata.Builders;
++using LMS.Domain.Entities;
++
++namespace LMS.Infrastructure.Data.Configurations;
++
++public class UserRoleConfiguration : IEntityTypeConfiguration<UserRole>
++{
++    public void Configure(EntityTypeBuilder<UserRole> builder)
++    {
++        builder.ToTable("UserRoles");
++        builder.HasKey(ur => ur.Id);
++
++        builder.HasIndex(ur => new { ur.UserId, ur.RoleId }).IsUnique();
++
++        builder.HasOne(ur => ur.User)
++            .WithMany(u => u.UserRoles)
++            .HasForeignKey(ur => ur.UserId)
++            .OnDelete(DeleteBehavior.Cascade);
++
++        builder.HasOne(ur => ur.Role)
++            .WithMany()
++            .HasForeignKey(ur => ur.RoleId)
++            .OnDelete(DeleteBehavior.Cascade);
++    }
++}
+diff --git a/src/LMS.Infrastructure/Data/DbSeeder.cs b/src/LMS.Infrastructure/Data/DbSeeder.cs
+index 6ad58ad..7db8dd8 100644
+--- a/src/LMS.Infrastructure/Data/DbSeeder.cs
++++ b/src/LMS.Infrastructure/Data/DbSeeder.cs
+@@ -36,11 +36,13 @@ public static class DbSeeder
+                 LastName = "Administrator",
+                 PhoneNumber = "+1234567890",
+                 IsActive = true,
+-                EmailConfirmed = true,
+-                RoleId = adminRole.Id
++                EmailConfirmed = true
+             };
+             await context.Users.AddAsync(adminUser);
+             await context.SaveChangesAsync();
++
++            await context.UserRoles.AddAsync(new UserRole { UserId = adminUser.Id, RoleId = adminRole.Id });
++            await context.SaveChangesAsync();
+         }
+ 
+         // Seed Member Types
+@@ -51,30 +53,27 @@ public static class DbSeeder
+                 new MemberType
+                 {
+                     Name = "Student",
+-                    Description = "Student member type",
+                     MaxBooksAllowed = 3,
+-                    LoanDurationDays = 14,
+-                    MaxRenewalsAllowed = 2,
++                    LoanDays = 14,
++                    MaxRenewals = 2,
+                     FinePerDay = 1.00m,
+                     ReservationExpiryHours = 48
+                 },
+                 new MemberType
+                 {
+                     Name = "Faculty",
+-                    Description = "Faculty member type",
+                     MaxBooksAllowed = 10,
+-                    LoanDurationDays = 30,
+-                    MaxRenewalsAllowed = 3,
++                    LoanDays = 30,
++                    MaxRenewals = 3,
+                     FinePerDay = 0.50m,
+                     ReservationExpiryHours = 72
+                 },
+                 new MemberType
+                 {
+                     Name = "General",
+-                    Description = "General public member type",
+                     MaxBooksAllowed = 2,
+-                    LoanDurationDays = 14,
+-                    MaxRenewalsAllowed = 1,
++                    LoanDays = 14,
++                    MaxRenewals = 1,
+                     FinePerDay = 2.00m,
+                     ReservationExpiryHours = 24
+                 }
+@@ -151,9 +150,9 @@ public static class DbSeeder
+         {
+             var authors = new List<Author>
+             {
+-                new Author { FirstName = "Robert", LastName = "Martin", Biography = "Known as Uncle Bob, software engineering expert", BirthDate = new DateTime(1952, 12, 5) },
+-                new Author { FirstName = "Martin", LastName = "Fowler", Biography = "Author of Patterns of Enterprise Application Architecture", BirthDate = new DateTime(1963, 1, 18) },
+-                new Author { FirstName = "Eric", LastName = "Evans", Biography = "Author of Domain-Driven Design", BirthDate = new DateTime(1962, 1, 1) },
++                new Author { FirstName = "Robert", LastName = "Martin", Biography = "Known as Uncle Bob, software engineering expert", DateOfBirth = new DateTime(1952, 12, 5) },
++                new Author { FirstName = "Martin", LastName = "Fowler", Biography = "Author of Patterns of Enterprise Application Architecture", DateOfBirth = new DateTime(1963, 1, 18) },
++                new Author { FirstName = "Eric", LastName = "Evans", Biography = "Author of Domain-Driven Design", DateOfBirth = new DateTime(1962, 1, 1) },
+                 new Author { FirstName = "Andrew", LastName = "Hunt", Biography = "Co-author of The Pragmatic Programmer" },
+                 new Author { FirstName = "David", LastName = "Thomas", Biography = "Co-author of The Pragmatic Programmer" },
+                 new Author { FirstName = "Kent", LastName = "Beck", Biography = "Creator of Extreme Programming and Test-Driven Development" },
+diff --git a/src/LMS.Infrastructure/Data/LibraryDbContext.cs b/src/LMS.Infrastructure/Data/LibraryDbContext.cs
+index 9a7bb81..ab7101a 100644
+--- a/src/LMS.Infrastructure/Data/LibraryDbContext.cs
++++ b/src/LMS.Infrastructure/Data/LibraryDbContext.cs
+@@ -11,6 +11,7 @@ public class LibraryDbContext : DbContext
+     // Users & Authentication
+     public DbSet<User> Users => Set<User>();
+     public DbSet<Role> Roles => Set<Role>();
++    public DbSet<UserRole> UserRoles => Set<UserRole>();
+     public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
+ 
+     // Members
+@@ -43,6 +44,7 @@ public class LibraryDbContext : DbContext
+         // Apply all entity configurations
+         modelBuilder.ApplyConfiguration(new UserConfiguration());
+         modelBuilder.ApplyConfiguration(new RoleConfiguration());
++        modelBuilder.ApplyConfiguration(new UserRoleConfiguration());
+         modelBuilder.ApplyConfiguration(new RefreshTokenConfiguration());
+         modelBuilder.ApplyConfiguration(new MemberConfiguration());
+         modelBuilder.ApplyConfiguration(new MemberTypeConfiguration());
+diff --git a/src/LMS.Infrastructure/Repositories/AuditLogRepository.cs b/src/LMS.Infrastructure/Repositories/AuditLogRepository.cs
+index f345458..8beeb83 100644
+--- a/src/LMS.Infrastructure/Repositories/AuditLogRepository.cs
++++ b/src/LMS.Infrastructure/Repositories/AuditLogRepository.cs
+@@ -10,29 +10,26 @@ public class AuditLogRepository : GenericRepository<AuditLog>, IAuditLogReposito
+ {
+     public AuditLogRepository(LibraryDbContext context) : base(context) { }
+ 
+-    public async Task<PaginatedResult<AuditLog>> GetPagedAsync(PaginationRequest request, Guid? userId = null, string? entityType = null, Guid? entityId = null, string? action = null, DateTime? from = null, DateTime? to = null, CancellationToken cancellationToken = default)
++    public async Task<PaginatedResult<AuditLog>> GetPagedAsync(PaginationRequest request, string? entityName = null, string? entityId = null, Guid? userId = null, DateTime? fromDate = null, DateTime? toDate = null, CancellationToken cancellationToken = default)
+     {
+         var query = _dbSet
+             .Include(a => a.User)
+             .AsNoTracking();
+ 
+-        if (userId.HasValue)
+-            query = query.Where(a => a.UserId == userId.Value);
++        if (!string.IsNullOrWhiteSpace(entityName))
++            query = query.Where(a => a.EntityName == entityName);
+ 
+-        if (!string.IsNullOrWhiteSpace(entityType))
+-            query = query.Where(a => a.EntityType == entityType);
++        if (!string.IsNullOrWhiteSpace(entityId) && Guid.TryParse(entityId, out var entityGuid))
++            query = query.Where(a => a.EntityId == entityGuid);
+ 
+-        if (entityId.HasValue)
+-            query = query.Where(a => a.EntityId == entityId.Value);
+-
+-        if (!string.IsNullOrWhiteSpace(action))
+-            query = query.Where(a => a.Action == action);
++        if (userId.HasValue)
++            query = query.Where(a => a.UserId == userId.Value);
+ 
+-        if (from.HasValue)
+-            query = query.Where(a => a.CreatedAt >= from.Value);
++        if (fromDate.HasValue)
++            query = query.Where(a => a.CreatedAt >= fromDate.Value);
+ 
+-        if (to.HasValue)
+-            query = query.Where(a => a.CreatedAt <= to.Value);
++        if (toDate.HasValue)
++            query = query.Where(a => a.CreatedAt <= toDate.Value);
+ 
+         var totalCount = await query.CountAsync(cancellationToken);
+ 
+@@ -51,26 +48,14 @@ public class AuditLogRepository : GenericRepository<AuditLog>, IAuditLogReposito
+         };
+     }
+ 
+-    public async Task<IEnumerable<AuditLog>> GetByEntityAsync(string entityType, Guid entityId, CancellationToken cancellationToken = default)
+-    {
+-        return await _dbSet
+-            .Where(a => a.EntityType == entityType && a.EntityId == entityId)
+-            .OrderByDescending(a => a.CreatedAt)
+-            .ToListAsync(cancellationToken);
+-    }
+-
+-    public async Task<IEnumerable<AuditLog>> GetByUserAsync(Guid userId, DateTime? from = null, DateTime? to = null, CancellationToken cancellationToken = default)
++    public async Task<IEnumerable<AuditLog>> GetByEntityAsync(string entityName, string entityId, CancellationToken cancellationToken = default)
+     {
+-        var query = _dbSet.Where(a => a.UserId == userId);
++        if (!Guid.TryParse(entityId, out var entityGuid))
++            return Enumerable.Empty<AuditLog>();
+ 
+-        if (from.HasValue)
+-            query = query.Where(a => a.CreatedAt >= from.Value);
+-
+-        if (to.HasValue)
+-            query = query.Where(a => a.CreatedAt <= to.Value);
+-
+-        return await query
++        return await _dbSet
++            .Where(a => a.EntityName == entityName && a.EntityId == entityGuid)
+             .OrderByDescending(a => a.CreatedAt)
+             .ToListAsync(cancellationToken);
+     }
+-}
+\ No newline at end of file
++}
+diff --git a/src/LMS.Infrastructure/Repositories/BookRepository.cs b/src/LMS.Infrastructure/Repositories/BookRepository.cs
+index 68c53a0..3586322 100644
+--- a/src/LMS.Infrastructure/Repositories/BookRepository.cs
++++ b/src/LMS.Infrastructure/Repositories/BookRepository.cs
+@@ -82,6 +82,11 @@ public class BookRepository : GenericRepository<Book>, IBookRepository
+             .ToListAsync(cancellationToken);
+     }
+ 
++    public async Task<int> GetCountSinceAsync(DateTime since, CancellationToken cancellationToken = default)
++    {
++        return await _dbSet.CountAsync(b => b.CreatedAt >= since, cancellationToken);
++    }
++
+     public async Task<IEnumerable<Book>> SearchAsync(string query, int maxResults, CancellationToken cancellationToken = default)
+     {
+         if (string.IsNullOrWhiteSpace(query))
+diff --git a/src/LMS.Infrastructure/Repositories/CategoryRepository.cs b/src/LMS.Infrastructure/Repositories/CategoryRepository.cs
+index 3c6fac5..541e562 100644
+--- a/src/LMS.Infrastructure/Repositories/CategoryRepository.cs
++++ b/src/LMS.Infrastructure/Repositories/CategoryRepository.cs
+@@ -30,7 +30,7 @@ public class CategoryRepository : GenericRepository<Category>, ICategoryReposito
+                 CategoryId = c.Id,
+                 CategoryName = c.Name,
+                 TotalBooks = c.Books.Count,
+-                TotalLoans = c.Books.SelectMany(b => b.Loans).Count()
++                TotalLoans = c.Books.SelectMany(b => b.BookCopies).SelectMany(bc => bc.Loans).Count()
+             })
+             .ToListAsync(cancellationToken);
+     }
+diff --git a/src/LMS.Infrastructure/Repositories/FineRepository.cs b/src/LMS.Infrastructure/Repositories/FineRepository.cs
+index a0b8db1..92161b7 100644
+--- a/src/LMS.Infrastructure/Repositories/FineRepository.cs
++++ b/src/LMS.Infrastructure/Repositories/FineRepository.cs
+@@ -14,8 +14,8 @@ public class FineRepository : GenericRepository<Fine>, IFineRepository
+     public async Task<PaginatedResult<Fine>> GetPagedAsync(PaginationRequest request, Guid? memberId = null, FineStatus? status = null, CancellationToken cancellationToken = default)
+     {
+         var query = _dbSet
+-            .Include(f => f.Member)
+-            .Include(f => f.Loan).ThenInclude(l => l!.BookCopy).ThenInclude(bc => bc!.Book)
++            .Include(f => f.Member).ThenInclude(m => m.User)
++            .Include(f => f.Loan).ThenInclude(l => l.BookCopy).ThenInclude(bc => bc.Book)
+             .AsNoTracking();
+ 
+         if (memberId.HasValue)
+@@ -41,62 +41,54 @@ public class FineRepository : GenericRepository<Fine>, IFineRepository
+         };
+     }
+ 
+-    public async Task<IEnumerable<Fine>> GetByMemberAsync(Guid memberId, CancellationToken cancellationToken = default)
++    public async Task<IEnumerable<Fine>> GetByLoanAsync(Guid loanId, CancellationToken cancellationToken = default)
+     {
+         return await _dbSet
+-            .Include(f => f.Loan).ThenInclude(l => l!.BookCopy).ThenInclude(bc => bc!.Book)
+-            .Where(f => f.MemberId == memberId)
++            .Where(f => f.LoanId == loanId)
+             .OrderByDescending(f => f.CreatedAt)
+             .ToListAsync(cancellationToken);
+     }
+ 
+-    public async Task<IEnumerable<Fine>> GetUnpaidByMemberAsync(Guid memberId, CancellationToken cancellationToken = default)
++    public async Task<IEnumerable<Fine>> GetByMemberAsync(Guid memberId, CancellationToken cancellationToken = default)
+     {
+         return await _dbSet
+-            .Include(f => f.Loan).ThenInclude(l => l!.BookCopy).ThenInclude(bc => bc!.Book)
+-            .Where(f => f.MemberId == memberId && (f.Status == FineStatus.Pending || f.Status == FineStatus.Partial))
++            .Include(f => f.Loan).ThenInclude(l => l.BookCopy).ThenInclude(bc => bc.Book)
++            .Where(f => f.MemberId == memberId)
+             .OrderByDescending(f => f.CreatedAt)
+             .ToListAsync(cancellationToken);
+     }
+ 
+-    public async Task<decimal> GetTotalUnpaidByMemberAsync(Guid memberId, CancellationToken cancellationToken = default)
++    public async Task<IEnumerable<Fine>> GetOutstandingByMemberAsync(Guid memberId, CancellationToken cancellationToken = default)
+     {
+         return await _dbSet
+-            .Where(f => f.MemberId == memberId && (f.Status == FineStatus.Pending || f.Status == FineStatus.Partial))
+-            .SumAsync(f => f.Amount - f.AmountPaid, cancellationToken);
++            .Include(f => f.Loan).ThenInclude(l => l.BookCopy).ThenInclude(bc => bc.Book)
++            .Where(f => f.MemberId == memberId && (f.Status == FineStatus.Unpaid || f.Status == FineStatus.PartiallyPaid))
++            .OrderByDescending(f => f.CreatedAt)
++            .ToListAsync(cancellationToken);
+     }
+ 
+-    public async Task<decimal> GetTotalCollectedAsync(DateTime? from = null, DateTime? to = null, CancellationToken cancellationToken = default)
++    public async Task<decimal> GetTotalOutstandingByMemberAsync(Guid memberId, CancellationToken cancellationToken = default)
+     {
+-        var query = _dbSet.Where(f => f.Status == FineStatus.Paid);
+-
+-        if (from.HasValue)
+-            query = query.Where(f => f.PaidAt >= from.Value);
+-
+-        if (to.HasValue)
+-            query = query.Where(f => f.PaidAt <= to.Value);
+-
+-        return await query.SumAsync(f => f.AmountPaid, cancellationToken);
++        return await _dbSet
++            .Where(f => f.MemberId == memberId && (f.Status == FineStatus.Unpaid || f.Status == FineStatus.PartiallyPaid))
++            .SumAsync(f => f.Amount - f.PaidAmount, cancellationToken);
+     }
+ 
+     public async Task<decimal> GetTotalOutstandingAsync(CancellationToken cancellationToken = default)
+     {
+         return await _dbSet
+-            .Where(f => f.Status == FineStatus.Pending || f.Status == FineStatus.Partial)
+-            .SumAsync(f => f.Amount - f.AmountPaid, cancellationToken);
++            .Where(f => f.Status == FineStatus.Unpaid || f.Status == FineStatus.PartiallyPaid)
++            .SumAsync(f => f.Amount - f.PaidAmount, cancellationToken);
+     }
+ 
+     public async Task<PaginatedResult<FineReportInfo>> GetFineReportAsync(PaginationRequest request, CancellationToken cancellationToken = default)
+     {
+-        var query = _dbSet
+-            .Include(f => f.Member).ThenInclude(m => m.User)
+-            .Include(f => f.Loan).ThenInclude(l => l.BookCopy).ThenInclude(bc => bc.Book)
+-            .AsNoTracking();
++        var query = _dbSet.AsNoTracking();
+ 
+         var totalCount = await query.CountAsync(cancellationToken);
+ 
+         var items = await query
+-            .OrderByDescending(f => f.IncurredDate)
++            .OrderByDescending(f => f.CreatedAt)
+             .Skip((request.PageNumber - 1) * request.PageSize)
+             .Take(request.PageSize)
+             .Select(f => new FineReportInfo
+@@ -106,11 +98,11 @@ public class FineRepository : GenericRepository<Fine>, IFineRepository
+                 MemberNumber = f.Member.MembershipNumber,
+                 BookTitle = f.Loan.BookCopy.Book.Title,
+                 Amount = f.Amount,
+-                PaidAmount = f.AmountPaid,
+-                OutstandingAmount = f.Amount - f.AmountPaid,
++                PaidAmount = f.PaidAmount,
++                OutstandingAmount = f.Amount - f.PaidAmount,
+                 Status = f.Status,
+-                IncurredDate = f.IncurredDate,
+-                PaidDate = f.PaidAt
++                IncurredDate = f.CreatedAt,
++                PaidDate = f.Payments.Max(p => (DateTime?)p.PaidAt)
+             })
+             .ToListAsync(cancellationToken);
+ 
+@@ -122,4 +114,4 @@ public class FineRepository : GenericRepository<Fine>, IFineRepository
+             PageSize = request.PageSize
+         };
+     }
+-}
+\ No newline at end of file
++}
+diff --git a/src/LMS.Infrastructure/Repositories/GenericRepository.cs b/src/LMS.Infrastructure/Repositories/GenericRepository.cs
+index e05d3c8..7b1a5aa 100644
+--- a/src/LMS.Infrastructure/Repositories/GenericRepository.cs
++++ b/src/LMS.Infrastructure/Repositories/GenericRepository.cs
+@@ -80,6 +80,12 @@ public class GenericRepository<T> : IGenericRepository<T> where T : BaseEntity
+         return entities;
+     }
+ 
++    public virtual Task UpdateAsync(T entity, CancellationToken cancellationToken = default)
++    {
++        _dbSet.Update(entity);
++        return Task.CompletedTask;
++    }
++
+     public virtual void Update(T entity)
+     {
+         _dbSet.Update(entity);
+diff --git a/src/LMS.Infrastructure/Repositories/LoanRepository.cs b/src/LMS.Infrastructure/Repositories/LoanRepository.cs
+index 3274a9a..476fdfe 100644
+--- a/src/LMS.Infrastructure/Repositories/LoanRepository.cs
++++ b/src/LMS.Infrastructure/Repositories/LoanRepository.cs
+@@ -17,7 +17,7 @@ public class LoanRepository : GenericRepository<Loan>, ILoanRepository
+             .Include(l => l.BookCopy).ThenInclude(bc => bc.Book)
+             .Include(l => l.Member)
+             .Include(l => l.IssuedBy)
+-            .Include(l => l.ReturnedBy)
++            .Include(l => l.ReturnedByUser)
+             .AsNoTracking();
+ 
+         if (memberId.HasValue)
+@@ -169,8 +169,8 @@ public class LoanRepository : GenericRepository<Loan>, ILoanRepository
+             .Where(l => l.Status == LoanStatus.Returned && l.ReturnDate >= startOfYear && l.ReturnDate <= endOfYear)
+             .ToListAsync(cancellationToken);
+ 
+-        var finesInYear = await _context.Fines
+-            .Where(f => f.IncurredDate >= startOfYear && f.IncurredDate <= endOfYear && f.Status == FineStatus.Paid)
++        var finesInYear = await _context.Payments
++            .Where(p => p.PaidAt >= startOfYear && p.PaidAt <= endOfYear)
+             .ToListAsync(cancellationToken);
+ 
+         var newBooksInYear = await _context.Books
+@@ -190,7 +190,7 @@ public class LoanRepository : GenericRepository<Loan>, ILoanRepository
+ 
+             var loansThisMonth = loansInYear.Count(l => l.IssueDate >= monthStart && l.IssueDate <= monthEnd);
+             var returnsThisMonth = returnsInYear.Count(l => l.ReturnDate.HasValue && l.ReturnDate >= monthStart && l.ReturnDate <= monthEnd);
+-            var finesThisMonth = finesInYear.Where(f => f.PaidDate.HasValue && f.PaidDate >= monthStart && f.PaidDate <= monthEnd).Sum(f => f.PaidAmount);
++            var finesThisMonth = finesInYear.Where(p => p.PaidAt >= monthStart && p.PaidAt <= monthEnd).Sum(p => p.Amount);
+             var newBooksThisMonth = newBooksInYear.Count(b => b.CreatedAt >= monthStart && b.CreatedAt <= monthEnd);
+             var newMembersThisMonth = newMembersInYear.Count(m => m.CreatedAt >= monthStart && m.CreatedAt <= monthEnd);
+ 
+diff --git a/src/LMS.Infrastructure/Repositories/MemberRepository.cs b/src/LMS.Infrastructure/Repositories/MemberRepository.cs
+index da764d3..1fff296 100644
+--- a/src/LMS.Infrastructure/Repositories/MemberRepository.cs
++++ b/src/LMS.Infrastructure/Repositories/MemberRepository.cs
+@@ -14,20 +14,30 @@ public class MemberRepository : GenericRepository<Member>, IMemberRepository
+     public async Task<Member?> GetByMemberNumberAsync(string memberNumber, CancellationToken cancellationToken = default)
+     {
+         return await _dbSet
++            .Include(m => m.User)
+             .Include(m => m.MemberType)
+-            .FirstOrDefaultAsync(m => m.MemberNumber == memberNumber, cancellationToken);
++            .FirstOrDefaultAsync(m => m.MembershipNumber == memberNumber, cancellationToken);
++    }
++
++    public async Task<Member?> GetByUserIdAsync(Guid userId, CancellationToken cancellationToken = default)
++    {
++        return await _dbSet
++            .Include(m => m.User)
++            .Include(m => m.MemberType)
++            .FirstOrDefaultAsync(m => m.UserId == userId, cancellationToken);
+     }
+ 
+     public async Task<Member?> GetByEmailAsync(string email, CancellationToken cancellationToken = default)
+     {
+         return await _dbSet
++            .Include(m => m.User)
+             .Include(m => m.MemberType)
+-            .FirstOrDefaultAsync(m => m.Email == email, cancellationToken);
++            .FirstOrDefaultAsync(m => m.User.Email == email, cancellationToken);
+     }
+ 
+     public async Task<bool> IsMemberNumberUniqueAsync(string memberNumber, Guid? excludeId = null, CancellationToken cancellationToken = default)
+     {
+-        var query = _dbSet.Where(m => m.MemberNumber == memberNumber);
++        var query = _dbSet.Where(m => m.MembershipNumber == memberNumber);
+         if (excludeId.HasValue)
+             query = query.Where(m => m.Id != excludeId.Value);
+         return !await query.AnyAsync(cancellationToken);
+@@ -35,7 +45,7 @@ public class MemberRepository : GenericRepository<Member>, IMemberRepository
+ 
+     public async Task<bool> IsEmailUniqueAsync(string email, Guid? excludeId = null, CancellationToken cancellationToken = default)
+     {
+-        var query = _dbSet.Where(m => m.Email == email);
++        var query = _dbSet.Where(m => m.User.Email == email);
+         if (excludeId.HasValue)
+             query = query.Where(m => m.Id != excludeId.Value);
+         return !await query.AnyAsync(cancellationToken);
+@@ -43,10 +53,13 @@ public class MemberRepository : GenericRepository<Member>, IMemberRepository
+ 
+     public async Task<PaginatedResult<Member>> GetPagedAsync(PaginationRequest request, bool? isActive = null, Guid? memberTypeId = null, string? search = null, CancellationToken cancellationToken = default)
+     {
+-        var query = _dbSet.Include(m => m.MemberType).AsNoTracking();
++        var query = _dbSet
++            .Include(m => m.User)
++            .Include(m => m.MemberType)
++            .AsNoTracking();
+ 
+         if (isActive.HasValue)
+-            query = query.Where(m => m.IsActive == isActive.Value);
++            query = query.Where(m => m.IsBlocked != isActive.Value);
+ 
+         if (memberTypeId.HasValue)
+             query = query.Where(m => m.MemberTypeId == memberTypeId.Value);
+@@ -55,15 +68,16 @@ public class MemberRepository : GenericRepository<Member>, IMemberRepository
+         {
+             var searchLower = search.ToLower();
+             query = query.Where(m =>
+-                m.FirstName.ToLower().Contains(searchLower) ||
+-                m.LastName.ToLower().Contains(searchLower) ||
+-                m.Email.ToLower().Contains(searchLower) ||
+-                m.MemberNumber.ToLower().Contains(searchLower));
++                m.User.FirstName.ToLower().Contains(searchLower) ||
++                m.User.LastName.ToLower().Contains(searchLower) ||
++                m.User.Email.ToLower().Contains(searchLower) ||
++                m.MembershipNumber.ToLower().Contains(searchLower));
+         }
+ 
+         var totalCount = await query.CountAsync(cancellationToken);
+ 
+         var items = await query
++            .OrderBy(m => m.MembershipNumber)
+             .Skip((request.PageNumber - 1) * request.PageSize)
+             .Take(request.PageSize)
+             .ToListAsync(cancellationToken);
+@@ -86,37 +100,39 @@ public class MemberRepository : GenericRepository<Member>, IMemberRepository
+     public async Task<decimal> GetOutstandingFinesAsync(Guid memberId, CancellationToken cancellationToken = default)
+     {
+         return await _context.Fines
+-            .Where(f => f.MemberId == memberId && f.Status != FineStatus.Paid)
+-            .SumAsync(f => f.Amount - f.Payments.Sum(p => p.Amount), cancellationToken);
++            .Where(f => f.MemberId == memberId && (f.Status == FineStatus.Unpaid || f.Status == FineStatus.PartiallyPaid))
++            .SumAsync(f => f.Amount - f.PaidAmount, cancellationToken);
+     }
+ 
+     public async Task<int> GetCountSinceAsync(DateTime since, CancellationToken cancellationToken = default)
+     {
+-        return await _dbSet
+-            .CountAsync(m => m.CreatedAt >= since, cancellationToken);
++        return await _dbSet.CountAsync(m => m.CreatedAt >= since, cancellationToken);
+     }
+ 
+     public async Task<PaginatedResult<MemberActivityInfo>> GetMemberActivityAsync(PaginationRequest request, CancellationToken cancellationToken = default)
+     {
+-        var query = _dbSet
+-            .Include(m => m.User)
+-            .AsNoTracking();
++        var query = _dbSet.AsNoTracking();
+ 
+         var totalCount = await query.CountAsync(cancellationToken);
+ 
++        var now = DateTime.UtcNow;
++
+         var items = await query
++            .OrderBy(m => m.MembershipNumber)
+             .Skip((request.PageNumber - 1) * request.PageSize)
+             .Take(request.PageSize)
+             .Select(m => new MemberActivityInfo
+             {
+                 MemberId = m.Id,
+                 MemberName = m.User.FirstName + " " + m.User.LastName,
+-                MemberNumber = m.MemberNumber,
+-                TotalLoans = _context.Loans.Count(l => l.MemberId == m.Id),
+-                ActiveLoans = _context.Loans.Count(l => l.MemberId == m.Id && l.Status == LoanStatus.Active),
+-                OverdueLoans = _context.Loans.Count(l => l.MemberId == m.Id && l.Status == LoanStatus.Active && l.DueDate < DateTime.UtcNow),
+-                TotalFines = _context.Fines.Where(f => f.MemberId == m.Id).Sum(f => f.Amount),
+-                OutstandingFines = _context.Fines.Where(f => f.MemberId == m.Id && f.Status != FineStatus.Paid).Sum(f => f.Amount - f.AmountPaid)
++                MemberNumber = m.MembershipNumber,
++                TotalLoans = m.Loans.Count,
++                ActiveLoans = m.Loans.Count(l => l.Status == LoanStatus.Active),
++                OverdueLoans = m.Loans.Count(l => l.Status == LoanStatus.Active && l.DueDate < now),
++                TotalFines = m.Fines.Sum(f => (decimal?)f.Amount) ?? 0m,
++                OutstandingFines = m.Fines
++                    .Where(f => f.Status == FineStatus.Unpaid || f.Status == FineStatus.PartiallyPaid)
++                    .Sum(f => (decimal?)(f.Amount - f.PaidAmount)) ?? 0m
+             })
+             .ToListAsync(cancellationToken);
+ 
+@@ -128,4 +144,4 @@ public class MemberRepository : GenericRepository<Member>, IMemberRepository
+             PageSize = request.PageSize
+         };
+     }
+-}
+\ No newline at end of file
++}
+diff --git a/src/LMS.Infrastructure/Repositories/NotificationRepository.cs b/src/LMS.Infrastructure/Repositories/NotificationRepository.cs
+index f4650de..91ba171 100644
+--- a/src/LMS.Infrastructure/Repositories/NotificationRepository.cs
++++ b/src/LMS.Infrastructure/Repositories/NotificationRepository.cs
+@@ -1,7 +1,6 @@
+ using LMS.Application.DTOs;
+ using LMS.Application.Interfaces;
+ using LMS.Domain.Entities;
+-using LMS.Domain.Enums;
+ using LMS.Infrastructure.Data;
+ using Microsoft.EntityFrameworkCore;
+ 
+@@ -11,7 +10,7 @@ public class NotificationRepository : GenericRepository<Notification>, INotifica
+ {
+     public NotificationRepository(LibraryDbContext context) : base(context) { }
+ 
+-    public async Task<PaginatedResult<Notification>> GetPagedAsync(PaginationRequest request, Guid? userId = null, NotificationType? type = null, NotificationChannel? channel = null, bool? isRead = null, CancellationToken cancellationToken = default)
++    public async Task<PaginatedResult<Notification>> GetPagedAsync(PaginationRequest request, Guid? userId = null, bool? isRead = null, CancellationToken cancellationToken = default)
+     {
+         var query = _dbSet
+             .Include(n => n.User)
+@@ -20,12 +19,6 @@ public class NotificationRepository : GenericRepository<Notification>, INotifica
+         if (userId.HasValue)
+             query = query.Where(n => n.UserId == userId.Value);
+ 
+-        if (type.HasValue)
+-            query = query.Where(n => n.Type == type.Value);
+-
+-        if (channel.HasValue)
+-            query = query.Where(n => n.Channel == channel.Value);
+-
+         if (isRead.HasValue)
+             query = query.Where(n => n.IsRead == isRead.Value);
+ 
+@@ -54,25 +47,8 @@ public class NotificationRepository : GenericRepository<Notification>, INotifica
+             .ToListAsync(cancellationToken);
+     }
+ 
+-    public async Task<int> GetUnreadCountByUserAsync(Guid userId, CancellationToken cancellationToken = default)
++    public async Task<int> GetUnreadCountAsync(Guid userId, CancellationToken cancellationToken = default)
+     {
+-        return await _dbSet
+-            .CountAsync(n => n.UserId == userId && !n.IsRead, cancellationToken);
+-    }
+-
+-    public async Task<IEnumerable<Notification>> GetPendingToSendAsync(CancellationToken cancellationToken = default)
+-    {
+-        return await _dbSet
+-            .Where(n => n.Status == NotificationStatus.Pending)
+-            .OrderBy(n => n.CreatedAt)
+-            .ToListAsync(cancellationToken);
+-    }
+-
+-    public async Task<IEnumerable<Notification>> GetFailedNotificationsAsync(int maxRetries = 3, CancellationToken cancellationToken = default)
+-    {
+-        return await _dbSet
+-            .Where(n => n.Status == NotificationStatus.Failed && n.RetryCount < maxRetries)
+-            .OrderBy(n => n.CreatedAt)
+-            .ToListAsync(cancellationToken);
++        return await _dbSet.CountAsync(n => n.UserId == userId && !n.IsRead, cancellationToken);
+     }
+-}
+\ No newline at end of file
++}
+diff --git a/src/LMS.Infrastructure/Repositories/PaymentRepository.cs b/src/LMS.Infrastructure/Repositories/PaymentRepository.cs
+index 2aa11b2..8ff4a43 100644
+--- a/src/LMS.Infrastructure/Repositories/PaymentRepository.cs
++++ b/src/LMS.Infrastructure/Repositories/PaymentRepository.cs
+@@ -1,7 +1,6 @@
+ using LMS.Application.DTOs;
+ using LMS.Application.Interfaces;
+ using LMS.Domain.Entities;
+-using LMS.Domain.Enums;
+ using LMS.Infrastructure.Data;
+ using Microsoft.EntityFrameworkCore;
+ 
+@@ -11,24 +10,21 @@ public class PaymentRepository : GenericRepository<Payment>, IPaymentRepository
+ {
+     public PaymentRepository(LibraryDbContext context) : base(context) { }
+ 
+-    public async Task<PaginatedResult<Payment>> GetPagedAsync(PaginationRequest request, Guid? memberId = null, PaymentMode? mode = null, DateTime? from = null, DateTime? to = null, CancellationToken cancellationToken = default)
++    public async Task<PaginatedResult<Payment>> GetPagedAsync(PaginationRequest request, Guid? fineId = null, DateTime? fromDate = null, DateTime? toDate = null, CancellationToken cancellationToken = default)
+     {
+         var query = _dbSet
+-            .Include(p => p.Member)
+-            .Include(p => p.Fine).ThenInclude(f => f!.Loan).ThenInclude(l => l!.BookCopy).ThenInclude(bc => bc!.Book)
++            .Include(p => p.Fine).ThenInclude(f => f.Member).ThenInclude(m => m.User)
++            .Include(p => p.ReceivedBy)
+             .AsNoTracking();
+ 
+-        if (memberId.HasValue)
+-            query = query.Where(p => p.MemberId == memberId.Value);
++        if (fineId.HasValue)
++            query = query.Where(p => p.FineId == fineId.Value);
+ 
+-        if (mode.HasValue)
+-            query = query.Where(p => p.Mode == mode.Value);
++        if (fromDate.HasValue)
++            query = query.Where(p => p.PaidAt >= fromDate.Value);
+ 
+-        if (from.HasValue)
+-            query = query.Where(p => p.PaidAt >= from.Value);
+-
+-        if (to.HasValue)
+-            query = query.Where(p => p.PaidAt <= to.Value);
++        if (toDate.HasValue)
++            query = query.Where(p => p.PaidAt <= toDate.Value);
+ 
+         var totalCount = await query.CountAsync(cancellationToken);
+ 
+@@ -47,15 +43,6 @@ public class PaymentRepository : GenericRepository<Payment>, IPaymentRepository
+         };
+     }
+ 
+-    public async Task<IEnumerable<Payment>> GetByMemberAsync(Guid memberId, CancellationToken cancellationToken = default)
+-    {
+-        return await _dbSet
+-            .Include(p => p.Fine).ThenInclude(f => f!.Loan).ThenInclude(l => l!.BookCopy).ThenInclude(bc => bc!.Book)
+-            .Where(p => p.MemberId == memberId)
+-            .OrderByDescending(p => p.PaidAt)
+-            .ToListAsync(cancellationToken);
+-    }
+-
+     public async Task<IEnumerable<Payment>> GetByFineAsync(Guid fineId, CancellationToken cancellationToken = default)
+     {
+         return await _dbSet
+@@ -64,23 +51,10 @@ public class PaymentRepository : GenericRepository<Payment>, IPaymentRepository
+             .ToListAsync(cancellationToken);
+     }
+ 
+-    public async Task<decimal> GetTotalByPeriodAsync(DateTime from, DateTime to, CancellationToken cancellationToken = default)
++    public async Task<decimal> GetTotalByFineAsync(Guid fineId, CancellationToken cancellationToken = default)
+     {
+         return await _dbSet
+-            .Where(p => p.PaidAt >= from && p.PaidAt <= to)
+-            .SumAsync(p => p.Amount, cancellationToken);
+-    }
+-
+-    public async Task<decimal> GetTotalByModeAsync(PaymentMode mode, DateTime? from = null, DateTime? to = null, CancellationToken cancellationToken = default)
+-    {
+-        var query = _dbSet.Where(p => p.Mode == mode);
+-
+-        if (from.HasValue)
+-            query = query.Where(p => p.PaidAt >= from.Value);
+-
+-        if (to.HasValue)
+-            query = query.Where(p => p.PaidAt <= to.Value);
+-
+-        return await query.SumAsync(p => p.Amount, cancellationToken);
++            .Where(p => p.FineId == fineId)
++            .SumAsync(p => (decimal?)p.Amount, cancellationToken) ?? 0m;
+     }
+-}
+\ No newline at end of file
++}
+diff --git a/src/LMS.Infrastructure/Repositories/RefreshTokenRepository.cs b/src/LMS.Infrastructure/Repositories/RefreshTokenRepository.cs
+index 9587289..927e2ab 100644
+--- a/src/LMS.Infrastructure/Repositories/RefreshTokenRepository.cs
++++ b/src/LMS.Infrastructure/Repositories/RefreshTokenRepository.cs
+@@ -11,7 +11,9 @@ public class RefreshTokenRepository : GenericRepository<RefreshToken>, IRefreshT
+ 
+     public async Task<RefreshToken?> GetByTokenAsync(string token, CancellationToken cancellationToken = default)
+     {
+-        return await _dbSet.FirstOrDefaultAsync(rt => rt.Token == token, cancellationToken);
++        return await _dbSet
++            .Include(rt => rt.User)
++            .FirstOrDefaultAsync(rt => rt.Token == token, cancellationToken);
+     }
+ 
+     public async Task<IEnumerable<RefreshToken>> GetByUserIdAsync(Guid userId, CancellationToken cancellationToken = default)
+@@ -21,11 +23,14 @@ public class RefreshTokenRepository : GenericRepository<RefreshToken>, IRefreshT
+ 
+     public async Task RevokeAllUserTokensAsync(Guid userId, CancellationToken cancellationToken = default)
+     {
+-        var tokens = await _dbSet.Where(rt => rt.UserId == userId && !rt.IsRevoked).ToListAsync(cancellationToken);
++        var tokens = await _dbSet
++            .Where(rt => rt.UserId == userId && rt.RevokedAt == null)
++            .ToListAsync(cancellationToken);
++
+         foreach (var token in tokens)
+         {
+-            token.IsRevoked = true;
++            token.RevokedAt = DateTime.UtcNow;
+         }
+         _dbSet.UpdateRange(tokens);
+     }
+-}
+\ No newline at end of file
++}
+diff --git a/src/LMS.Infrastructure/Repositories/ReservationRepository.cs b/src/LMS.Infrastructure/Repositories/ReservationRepository.cs
+index 1d2d2ee..ca62615 100644
+--- a/src/LMS.Infrastructure/Repositories/ReservationRepository.cs
++++ b/src/LMS.Infrastructure/Repositories/ReservationRepository.cs
+@@ -15,8 +15,8 @@ public class ReservationRepository : GenericRepository<Reservation>, IReservatio
+     {
+         var query = _dbSet
+             .Include(r => r.Book)
+-            .Include(r => r.Member)
+-            .Include(r => r.FulfilledByBookCopy).ThenInclude(bc => bc!.Book)
++            .Include(r => r.Member).ThenInclude(m => m.User)
++            .Include(r => r.BookCopy)
+             .AsNoTracking();
+ 
+         if (memberId.HasValue)
+@@ -45,18 +45,19 @@ public class ReservationRepository : GenericRepository<Reservation>, IReservatio
+         };
+     }
+ 
++    // "Active" reservation = still waiting (Pending) or book is held for the member (Ready)
+     public async Task<IEnumerable<Reservation>> GetActiveByMemberAsync(Guid memberId, CancellationToken cancellationToken = default)
+     {
+         return await _dbSet
+             .Include(r => r.Book)
+-            .Where(r => r.MemberId == memberId && r.Status == ReservationStatus.Active)
++            .Where(r => r.MemberId == memberId && (r.Status == ReservationStatus.Pending || r.Status == ReservationStatus.Ready))
+             .ToListAsync(cancellationToken);
+     }
+ 
+     public async Task<IEnumerable<Reservation>> GetActiveByBookAsync(Guid bookId, CancellationToken cancellationToken = default)
+     {
+         return await _dbSet
+-            .Where(r => r.BookId == bookId && r.Status == ReservationStatus.Active)
++            .Where(r => r.BookId == bookId && (r.Status == ReservationStatus.Pending || r.Status == ReservationStatus.Ready))
+             .OrderBy(r => r.ReservedAt)
+             .ToListAsync(cancellationToken);
+     }
+@@ -64,16 +65,22 @@ public class ReservationRepository : GenericRepository<Reservation>, IReservatio
+     public async Task<Reservation?> GetNextInQueueAsync(Guid bookId, CancellationToken cancellationToken = default)
+     {
+         return await _dbSet
+-            .Include(r => r.Member)
+-            .Where(r => r.BookId == bookId && r.Status == ReservationStatus.Active)
++            .Include(r => r.Member).ThenInclude(m => m.User)
++            .Where(r => r.BookId == bookId && r.Status == ReservationStatus.Pending)
+             .OrderBy(r => r.ReservedAt)
+             .FirstOrDefaultAsync(cancellationToken);
+     }
+ 
+     public async Task<IEnumerable<Reservation>> GetExpiredReservationsAsync(CancellationToken cancellationToken = default)
+     {
++        var now = DateTime.UtcNow;
+         return await _dbSet
+-            .Where(r => r.Status == ReservationStatus.Active && r.ExpiresAt < DateTime.UtcNow)
++            .Where(r => (r.Status == ReservationStatus.Pending || r.Status == ReservationStatus.Ready) && r.ExpiresAt < now)
+             .ToListAsync(cancellationToken);
+     }
+-}
+\ No newline at end of file
++
++    public async Task<int> GetPendingReservationsCountAsync(CancellationToken cancellationToken = default)
++    {
++        return await _dbSet.CountAsync(r => r.Status == ReservationStatus.Pending, cancellationToken);
++    }
++}
+diff --git a/src/LMS.Infrastructure/Repositories/UserRepository.cs b/src/LMS.Infrastructure/Repositories/UserRepository.cs
+index 924ca7f..e32ddeb 100644
+--- a/src/LMS.Infrastructure/Repositories/UserRepository.cs
++++ b/src/LMS.Infrastructure/Repositories/UserRepository.cs
+@@ -1,3 +1,4 @@
++using LMS.Application.DTOs;
+ using LMS.Application.Interfaces;
+ using LMS.Domain.Entities;
+ using LMS.Infrastructure.Data;
+@@ -17,7 +18,7 @@ public class UserRepository : GenericRepository<User>, IUserRepository
+     public async Task<User?> GetByEmailWithRoleAsync(string email, CancellationToken cancellationToken = default)
+     {
+         return await _dbSet
+-            .Include(u => u.Role)
++            .Include(u => u.UserRoles).ThenInclude(ur => ur.Role)
+             .FirstOrDefaultAsync(u => u.Email == email, cancellationToken);
+     }
+ 
+@@ -31,6 +32,51 @@ public class UserRepository : GenericRepository<User>, IUserRepository
+ 
+     public async Task<IEnumerable<User>> GetByRoleAsync(Guid roleId, CancellationToken cancellationToken = default)
+     {
+-        return await _dbSet.Where(u => u.RoleId == roleId).ToListAsync(cancellationToken);
++        return await _dbSet
++            .Where(u => u.UserRoles.Any(ur => ur.RoleId == roleId))
++            .ToListAsync(cancellationToken);
++    }
++
++    public async Task<IEnumerable<Role>> GetRolesAsync(Guid userId, CancellationToken cancellationToken = default)
++    {
++        return await _context.UserRoles
++            .Where(ur => ur.UserId == userId)
++            .Select(ur => ur.Role)
++            .ToListAsync(cancellationToken);
++    }
++
++    public async Task<PaginatedResult<User>> GetPagedAsync(PaginationRequest request, string? search, bool? isActive, CancellationToken cancellationToken = default)
++    {
++        var query = _dbSet
++            .Include(u => u.UserRoles).ThenInclude(ur => ur.Role)
++            .AsNoTracking();
++
++        if (isActive.HasValue)
++            query = query.Where(u => u.IsActive == isActive.Value);
++
++        if (!string.IsNullOrWhiteSpace(search))
++        {
++            var searchLower = search.ToLower();
++            query = query.Where(u =>
++                u.FirstName.ToLower().Contains(searchLower) ||
++                u.LastName.ToLower().Contains(searchLower) ||
++                u.Email.ToLower().Contains(searchLower));
++        }
++
++        var totalCount = await query.CountAsync(cancellationToken);
++
++        var items = await query
++            .OrderBy(u => u.Email)
++            .Skip((request.PageNumber - 1) * request.PageSize)
++            .Take(request.PageSize)
++            .ToListAsync(cancellationToken);
++
++        return new PaginatedResult<User>
++        {
++            Items = items,
++            TotalCount = totalCount,
++            PageNumber = request.PageNumber,
++            PageSize = request.PageSize
++        };
+     }
+-}
+\ No newline at end of file
++}
+diff --git a/src/LMS.Infrastructure/Services/BackgroundJobs/NotificationJob.cs b/src/LMS.Infrastructure/Services/BackgroundJobs/NotificationJob.cs
+index 319ef94..afcbbec 100644
+--- a/src/LMS.Infrastructure/Services/BackgroundJobs/NotificationJob.cs
++++ b/src/LMS.Infrastructure/Services/BackgroundJobs/NotificationJob.cs
+@@ -1,5 +1,6 @@
+ using Hangfire;
+ using LMS.Application.Interfaces;
++using Microsoft.Extensions.DependencyInjection;
+ using Microsoft.Extensions.Logging;
+ 
+ namespace LMS.Infrastructure.Services.BackgroundJobs;
+@@ -21,11 +22,17 @@ public class NotificationJob
+         _logger.LogInformation("Starting overdue notifications job at {Time}", DateTime.UtcNow);
+ 
+         using var scope = _serviceProvider.CreateScope();
++        var circulationService = scope.ServiceProvider.GetRequiredService<ICirculationService>();
+         var notificationService = scope.ServiceProvider.GetRequiredService<INotificationService>();
+ 
+         try
+         {
+-            await notificationService.SendOverdueNotificationsAsync();
++            var overdueLoans = await circulationService.GetOverdueLoansAsync();
++            foreach (var loan in overdueLoans)
++            {
++                await notificationService.SendOverdueNotificationAsync(loan.Id);
++            }
++
+             _logger.LogInformation("Overdue notifications sent successfully");
+         }
+         catch (Exception ex)
+@@ -34,44 +41,4 @@ public class NotificationJob
+             throw;
+         }
+     }
+-
+-    [AutomaticRetry(Attempts = 3)]
+-    public async Task SendReservationReadyNotificationsAsync()
+-    {
+-        _logger.LogInformation("Starting reservation ready notifications job at {Time}", DateTime.UtcNow);
+-
+-        using var scope = _serviceProvider.CreateScope();
+-        var notificationService = scope.ServiceProvider.GetRequiredService<INotificationService>();
+-
+-        try
+-        {
+-            await notificationService.SendReservationReadyNotificationsAsync();
+-            _logger.LogInformation("Reservation ready notifications sent successfully");
+-        }
+-        catch (Exception ex)
+-        {
+-            _logger.LogError(ex, "Error sending reservation ready notifications");
+-            throw;
+-        }
+-    }
+-
+-    [AutomaticRetry(Attempts = 3)]
+-    public async Task SendFineNotificationsAsync()
+-    {
+-        _logger.LogInformation("Starting fine notifications job at {Time}", DateTime.UtcNow);
+-
+-        using var scope = _serviceProvider.CreateScope();
+-        var notificationService = scope.ServiceProvider.GetRequiredService<INotificationService>();
+-
+-        try
+-        {
+-            await notificationService.SendFineNotificationsAsync();
+-            _logger.LogInformation("Fine notifications sent successfully");
+-        }
+-        catch (Exception ex)
+-        {
+-            _logger.LogError(ex, "Error sending fine notifications");
+-            throw;
+-        }
+-    }
+-}
+\ No newline at end of file
++}
+diff --git a/src/LMS.Infrastructure/Services/BackgroundJobs/OverdueFineJob.cs b/src/LMS.Infrastructure/Services/BackgroundJobs/OverdueFineJob.cs
+index 6783c26..917f42e 100644
+--- a/src/LMS.Infrastructure/Services/BackgroundJobs/OverdueFineJob.cs
++++ b/src/LMS.Infrastructure/Services/BackgroundJobs/OverdueFineJob.cs
+@@ -1,5 +1,6 @@
+ using Hangfire;
+ using LMS.Application.Interfaces;
++using Microsoft.Extensions.DependencyInjection;
+ using Microsoft.Extensions.Logging;
+ 
+ namespace LMS.Infrastructure.Services.BackgroundJobs;
+@@ -16,21 +17,21 @@ public class OverdueFineJob
+     }
+ 
+     [AutomaticRetry(Attempts = 3)]
+-    public async Task ProcessOverdueFinesAsync()
++    public async Task ProcessOverdueLoansAsync()
+     {
+-        _logger.LogInformation("Starting overdue fines processing job at {Time}", DateTime.UtcNow);
++        _logger.LogInformation("Starting overdue loans processing job at {Time}", DateTime.UtcNow);
+ 
+         using var scope = _serviceProvider.CreateScope();
+         var circulationService = scope.ServiceProvider.GetRequiredService<ICirculationService>();
+ 
+         try
+         {
+-            await circulationService.ProcessOverdueFinesAsync();
+-            _logger.LogInformation("Overdue fines processing completed successfully");
++            await circulationService.ProcessOverdueLoansAsync();
++            _logger.LogInformation("Overdue loans processing completed successfully");
+         }
+         catch (Exception ex)
+         {
+-            _logger.LogError(ex, "Error processing overdue fines");
++            _logger.LogError(ex, "Error processing overdue loans");
+             throw;
+         }
+     }
+@@ -54,24 +55,4 @@ public class OverdueFineJob
+             throw;
+         }
+     }
+-
+-    [AutomaticRetry(Attempts = 3)]
+-    public async Task SendDueDateRemindersAsync()
+-    {
+-        _logger.LogInformation("Starting due date reminders job at {Time}", DateTime.UtcNow);
+-
+-        using var scope = _serviceProvider.CreateScope();
+-        var notificationService = scope.ServiceProvider.GetRequiredService<INotificationService>();
+-
+-        try
+-        {
+-            await notificationService.SendDueDateRemindersAsync();
+-            _logger.LogInformation("Due date reminders sent successfully");
+-        }
+-        catch (Exception ex)
+-        {
+-            _logger.LogError(ex, "Error sending due date reminders");
+-            throw;
+-        }
+-    }
+-}
+\ No newline at end of file
++}

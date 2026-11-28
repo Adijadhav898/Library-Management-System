@@ -30,7 +30,7 @@ public class CategoryRepository : GenericRepository<Category>, ICategoryReposito
                 CategoryId = c.Id,
                 CategoryName = c.Name,
                 TotalBooks = c.Books.Count,
-                TotalLoans = c.Books.SelectMany(b => b.Loans).Count()
+                TotalLoans = c.Books.SelectMany(b => b.BookCopies).SelectMany(bc => bc.Loans).Count()
             })
             .ToListAsync(cancellationToken);
     }

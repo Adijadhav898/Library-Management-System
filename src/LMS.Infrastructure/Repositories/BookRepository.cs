@@ -82,6 +82,11 @@ public class BookRepository : GenericRepository<Book>, IBookRepository
             .ToListAsync(cancellationToken);
     }
 
+    public async Task<int> GetCountSinceAsync(DateTime since, CancellationToken cancellationToken = default)
+    {
+        return await _dbSet.CountAsync(b => b.CreatedAt >= since, cancellationToken);
+    }
+
     public async Task<IEnumerable<Book>> SearchAsync(string query, int maxResults, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(query))

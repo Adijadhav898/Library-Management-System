@@ -17,7 +17,7 @@ public class LoanRepository : GenericRepository<Loan>, ILoanRepository
             .Include(l => l.BookCopy).ThenInclude(bc => bc.Book)
             .Include(l => l.Member)
             .Include(l => l.IssuedBy)
-            .Include(l => l.ReturnedBy)
+            .Include(l => l.ReturnedByUser)
             .AsNoTracking();
 
         if (memberId.HasValue)
@@ -169,8 +169,8 @@ public class LoanRepository : GenericRepository<Loan>, ILoanRepository
             .Where(l => l.Status == LoanStatus.Returned && l.ReturnDate >= startOfYear && l.ReturnDate <= endOfYear)
             .ToListAsync(cancellationToken);
 
-        var finesInYear = await _context.Fines
-            .Where(f => f.IncurredDate >= startOfYear && f.IncurredDate <= endOfYear && f.Status == FineStatus.Paid)
+        var finesInYear = await _context.Payments
+            .Where(p => p.PaidAt >= startOfYear && p.PaidAt <= endOfYear)
             .ToListAsync(cancellationToken);
 
         var newBooksInYear = await _context.Books
@@ -190,7 +190,7 @@ public class LoanRepository : GenericRepository<Loan>, ILoanRepository
 
             var loansThisMonth = loansInYear.Count(l => l.IssueDate >= monthStart && l.IssueDate <= monthEnd);
             var returnsThisMonth = returnsInYear.Count(l => l.ReturnDate.HasValue && l.ReturnDate >= monthStart && l.ReturnDate <= monthEnd);
-            var finesThisMonth = finesInYear.Where(f => f.PaidDate.HasValue && f.PaidDate >= monthStart && f.PaidDate <= monthEnd).Sum(f => f.PaidAmount);
+            var finesThisMonth = finesInYear.Where(p => p.PaidAt >= monthStart && p.PaidAt <= monthEnd).Sum(p => p.Amount);
             var newBooksThisMonth = newBooksInYear.Count(b => b.CreatedAt >= monthStart && b.CreatedAt <= monthEnd);
             var newMembersThisMonth = newMembersInYear.Count(m => m.CreatedAt >= monthStart && m.CreatedAt <= monthEnd);
 
