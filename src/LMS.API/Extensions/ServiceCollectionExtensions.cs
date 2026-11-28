@@ -1,11 +1,11 @@
-using LMS.API.Middleware;
+using FluentValidation;
+using Hangfire;
 using LMS.Application.Interfaces;
 using LMS.Application.Services;
 using LMS.Infrastructure.Data;
 using LMS.Infrastructure.Repositories;
 using LMS.Infrastructure.Security;
 using LMS.Infrastructure.Services;
-using LMS.Infrastructure.Services.BackgroundJobs;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
@@ -27,7 +27,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IReportService, ReportService>();
 
         services.AddAutoMapper(typeof(LMS.Application.Mapping.AuthProfile).Assembly);
-        services.AddValidatorsFromAssembly(typeof(LMS.Application.Validators.AuthValidators).Assembly);
+        services.AddValidatorsFromAssembly(typeof(LMS.Application.Validators.LoginRequestValidator).Assembly);
 
         return services;
     }
@@ -59,10 +59,10 @@ public static class ServiceCollectionExtensions
         services.AddScoped<ISettingRepository, SettingRepository>();
         services.AddScoped<IAuditLogRepository, AuditLogRepository>();
 
-        services.Configure<JwtSettings>(configuration.GetSection("JwtSettings"));
+        // TokenService reads the "Jwt" section directly from IConfiguration.
         services.AddScoped<ITokenService, TokenService>();
-        services.AddScoped<IPasswordHasher, PasswordHasher>();
 
+        services.Configure<EmailSettings>(configuration.GetSection("Email"));
         services.AddScoped<IEmailService, EmailService>();
 
         var fileStoragePath = configuration["FileStorage:BasePath"] ?? Path.Combine(Directory.GetCurrentDirectory(), "uploads");
@@ -79,7 +79,10 @@ public static class ServiceCollectionExtensions
 
     public static IServiceCollection AddApiServices(this IServiceCollection services, IConfiguration configuration)
     {
-        var jwtSettings = configuration.GetSection("JwtSettings").Get<JwtSettings>() ?? new JwtSettings();
+        // Must use the SAME keys/defaults as TokenService (section "Jwt"), otherwise tokens fail validation.
+        var secretKey = configuration["Jwt:SecretKey"] ?? "your-super-secret-jwt-key-change-in-production-min-32-chars";
+        var issuer = configuration["Jwt:Issuer"] ?? "LibraryManagementSystem";
+        var audience = configuration["Jwt:Audience"] ?? "LibraryManagementSystem";
 
         services.AddAuthentication(options =>
         {
@@ -94,9 +97,9 @@ public static class ServiceCollectionExtensions
                 ValidateAudience = true,
                 ValidateLifetime = true,
                 ValidateIssuerSigningKey = true,
-                ValidIssuer = jwtSettings.Issuer,
-                ValidAudience = jwtSettings.Audience,
-                IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtSettings.SecretKey)),
+                ValidIssuer = issuer,
+                ValidAudience = audience,
+                IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(secretKey)),
                 ClockSkew = TimeSpan.Zero
             };
 
@@ -188,13 +191,4 @@ public static class ServiceCollectionExtensions
 
         return services;
     }
-}
-
-public class JwtSettings
-{
-    public string SecretKey { get; set; } = string.Empty;
-    public string Issuer { get; set; } = string.Empty;
-    public string Audience { get; set; } = string.Empty;
-    public int AccessTokenExpirationMinutes { get; set; } = 15;
-    public int RefreshTokenExpirationDays { get; set; } = 7;
 }

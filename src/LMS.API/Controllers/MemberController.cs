@@ -1,210 +1,94 @@
-using LMS.Application.DTOs.Member;
+using LMS.Application.DTOs;
 using LMS.Application.Interfaces;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace LMS.API.Controllers;
 
-[ApiController]
-[Route("api/[controller]")]
 [Authorize(Policy = "LibrarianOrAdmin")]
-[Produces("application/json")]
-public class MemberController : ControllerBase
+public class MemberController : ApiControllerBase
 {
-    private readonly IMemberService _memberService;
-    private readonly ILogger<MemberController> _logger;
+    private readonly IMemberService _members;
 
-    public MemberController(IMemberService memberService, ILogger<MemberController> logger)
+    public MemberController(IMemberService members)
     {
-        _memberService = memberService;
-        _logger = logger;
+        _members = members;
     }
 
-    /// <summary>
-    /// Get all members with pagination and search
-    /// </summary>
+    // ---------- Members ----------
+
     [HttpGet]
-    [ProducesResponseType(typeof(PagedResultDto<MemberDto>), StatusCodes.Status200OK)]
-    public async Task<ActionResult<PagedResultDto<MemberDto>>> GetMembers(
-        [FromQuery] int page = 1,
-        [FromQuery] int pageSize = 10,
-        [FromQuery] string? search = null,
-        [FromQuery] bool? isActive = null,
-        [FromQuery] Guid? memberTypeId = null)
-    {
-        var result = await _memberService.GetMembersAsync(page, pageSize, search, isActive, memberTypeId);
-        return Ok(result);
-    }
+    public async Task<ActionResult<PaginatedResult<MemberDto>>> GetAll([FromQuery] MemberPaginationRequest request, [FromQuery] string? search, CancellationToken ct)
+        => Ok(await _members.GetAllAsync(request, request.IsActive, request.MemberTypeId, search, ct));
 
-    /// <summary>
-    /// Get member by ID
-    /// </summary>
     [HttpGet("{id:guid}")]
-    [ProducesResponseType(typeof(MemberDto), StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<ActionResult<MemberDto>> GetMember(Guid id)
+    public async Task<ActionResult<MemberDto>> GetById(Guid id, CancellationToken ct)
     {
-        var member = await _memberService.GetMemberByIdAsync(id);
-        if (member == null)
-        {
-            return NotFound(new { message = "Member not found" });
-        }
-        return Ok(member);
+        var member = await _members.GetByIdAsync(id, ct);
+        return member == null ? NotFound() : Ok(member);
     }
 
-    /// <summary>
-    /// Get member by user ID
-    /// </summary>
-    [HttpGet("user/{userId:guid}")]
-    [ProducesResponseType(typeof(MemberDto), StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<ActionResult<MemberDto>> GetMemberByUserId(Guid userId)
+    [HttpGet("by-number/{memberNumber}")]
+    public async Task<ActionResult<MemberDto>> GetByNumber(string memberNumber, CancellationToken ct)
     {
-        var member = await _memberService.GetMemberByUserIdAsync(userId);
-        if (member == null)
-        {
-            return NotFound(new { message = "Member not found" });
-        }
-        return Ok(member);
+        var member = await _members.GetByMemberNumberAsync(memberNumber, ct);
+        return member == null ? NotFound() : Ok(member);
     }
 
-    /// <summary>
-    /// Create a new member
-    /// </summary>
     [HttpPost]
-    [ProducesResponseType(typeof(MemberDto), StatusCodes.Status201Created)]
-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    [ProducesResponseType(StatusCodes.Status409Conflict)]
-    public async Task<ActionResult<MemberDto>> CreateMember([FromBody] CreateMemberRequestDto request)
+    public async Task<ActionResult<MemberDto>> Create([FromBody] CreateMemberRequest request, CancellationToken ct)
     {
-        try
-        {
-            var member = await _memberService.CreateMemberAsync(request);
-            return CreatedAtAction(nameof(GetMember), new { id = member.Id }, member);
-        }
-        catch (InvalidOperationException ex)
-        {
-            return Conflict(new { message = ex.Message });
-        }
+        var member = await _members.CreateAsync(request, ct);
+        return CreatedAtAction(nameof(GetById), new { id = member.Id }, member);
     }
 
-    /// <summary>
-    /// Update member
-    /// </summary>
     [HttpPut("{id:guid}")]
-    [ProducesResponseType(typeof(MemberDto), StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<ActionResult<MemberDto>> UpdateMember(Guid id, [FromBody] UpdateMemberRequestDto request)
+    public async Task<ActionResult<MemberDto>> Update(Guid id, [FromBody] UpdateMemberRequest request, CancellationToken ct)
     {
-        var member = await _memberService.UpdateMemberAsync(id, request);
-        if (member == null)
-        {
-            return NotFound(new { message = "Member not found" });
-        }
-        return Ok(member);
+        var member = await _members.UpdateAsync(id, request, ct);
+        return member == null ? NotFound() : Ok(member);
     }
 
-    /// <summary>
-    /// Delete member (soft delete)
-    /// </summary>
     [HttpDelete("{id:guid}")]
-    [ProducesResponseType(StatusCodes.Status204NoContent)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<IActionResult> DeleteMember(Guid id)
-    {
-        var result = await _memberService.DeleteMemberAsync(id);
-        if (!result)
-        {
-            return NotFound(new { message = "Member not found" });
-        }
-        return NoContent();
-    }
+    [Authorize(Policy = "AdminOnly")]
+    public async Task<IActionResult> Delete(Guid id, CancellationToken ct)
+        => await _members.DeleteAsync(id, ct) ? NoContent() : NotFound();
 
-    /// <summary>
-    /// Renew member membership
-    /// </summary>
-    [HttpPost("{id:guid}/renew")]
-    [ProducesResponseType(typeof(MemberDto), StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<ActionResult<MemberDto>> RenewMembership(Guid id, [FromBody] RenewMembershipRequestDto request)
-    {
-        var member = await _memberService.RenewMembershipAsync(id, request);
-        if (member == null)
-        {
-            return NotFound(new { message = "Member not found" });
-        }
-        return Ok(member);
-    }
+    [HttpPatch("{id:guid}/toggle-active")]
+    public async Task<IActionResult> ToggleActive(Guid id, CancellationToken ct)
+        => await _members.ToggleActiveAsync(id, ct) ? Ok() : NotFound();
 
-    /// <summary>
-    /// Get expiring members
-    /// </summary>
-    [HttpGet("expiring")]
-    [ProducesResponseType(typeof(IEnumerable<MemberDto>), StatusCodes.Status200OK)]
-    public async Task<ActionResult<IEnumerable<MemberDto>>> GetExpiringMembers([FromQuery] int days = 30)
-    {
-        var members = await _memberService.GetExpiringMembersAsync(days);
-        return Ok(members);
-    }
+    // ---------- Member types ----------
 
-    /// <summary>
-    /// Get member types
-    /// </summary>
     [HttpGet("types")]
-    [ProducesResponseType(typeof(IEnumerable<MemberTypeDto>), StatusCodes.Status200OK)]
-    public async Task<ActionResult<IEnumerable<MemberTypeDto>>> GetMemberTypes()
+    public async Task<ActionResult<PaginatedResult<MemberTypeDto>>> GetTypes([FromQuery] PaginationRequest request, CancellationToken ct)
+        => Ok(await _members.GetMemberTypesAsync(request, ct));
+
+    [HttpGet("types/{id:guid}")]
+    public async Task<ActionResult<MemberTypeDto>> GetTypeById(Guid id, CancellationToken ct)
     {
-        var types = await _memberService.GetMemberTypesAsync();
-        return Ok(types);
+        var type = await _members.GetMemberTypeByIdAsync(id, ct);
+        return type == null ? NotFound() : Ok(type);
     }
 
-    /// <summary>
-    /// Create member type
-    /// </summary>
     [HttpPost("types")]
     [Authorize(Policy = "AdminOnly")]
-    [ProducesResponseType(typeof(MemberTypeDto), StatusCodes.Status201Created)]
-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    public async Task<ActionResult<MemberTypeDto>> CreateMemberType([FromBody] CreateMemberTypeRequestDto request)
+    public async Task<ActionResult<MemberTypeDto>> CreateType([FromBody] CreateMemberTypeRequest request, CancellationToken ct)
     {
-        var type = await _memberService.CreateMemberTypeAsync(request);
-        return CreatedAtAction(nameof(GetMemberTypes), new { }, type);
+        var type = await _members.CreateMemberTypeAsync(request, ct);
+        return CreatedAtAction(nameof(GetTypeById), new { id = type.Id }, type);
     }
 
-    /// <summary>
-    /// Update member type
-    /// </summary>
     [HttpPut("types/{id:guid}")]
     [Authorize(Policy = "AdminOnly")]
-    [ProducesResponseType(typeof(MemberTypeDto), StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<ActionResult<MemberTypeDto>> UpdateMemberType(Guid id, [FromBody] UpdateMemberTypeRequestDto request)
+    public async Task<ActionResult<MemberTypeDto>> UpdateType(Guid id, [FromBody] UpdateMemberTypeRequest request, CancellationToken ct)
     {
-        var type = await _memberService.UpdateMemberTypeAsync(id, request);
-        if (type == null)
-        {
-            return NotFound(new { message = "Member type not found" });
-        }
-        return Ok(type);
+        var type = await _members.UpdateMemberTypeAsync(id, request, ct);
+        return type == null ? NotFound() : Ok(type);
     }
 
-    /// <summary>
-    /// Delete member type
-    /// </summary>
     [HttpDelete("types/{id:guid}")]
     [Authorize(Policy = "AdminOnly")]
-    [ProducesResponseType(StatusCodes.Status204NoContent)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<IActionResult> DeleteMemberType(Guid id)
-    {
-        var result = await _memberService.DeleteMemberTypeAsync(id);
-        if (!result)
-        {
-            return NotFound(new { message = "Member type not found" });
-        }
-        return NoContent();
-    }
+    public async Task<IActionResult> DeleteType(Guid id, CancellationToken ct)
+        => await _members.DeleteMemberTypeAsync(id, ct) ? NoContent() : NotFound();
 }

@@ -1,465 +1,195 @@
-using LMS.Application.DTOs.Catalog;
+using LMS.Application.DTOs;
 using LMS.Application.Interfaces;
+using LMS.Domain.Enums;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace LMS.API.Controllers;
 
-[ApiController]
-[Route("api/[controller]")]
-[Authorize(Policy = "LibrarianOrAdmin")]
-[Produces("application/json")]
-public class CatalogController : ControllerBase
+/// <summary>Books, authors, categories, publishers and book copies. Any logged-in user can read; staff can write.</summary>
+[Authorize]
+public class CatalogController : ApiControllerBase
 {
-    private readonly ICatalogService _catalogService;
-    private readonly ILogger<CatalogController> _logger;
+    private readonly ICatalogService _catalog;
 
-    public CatalogController(ICatalogService catalogService, ILogger<CatalogController> logger)
+    public CatalogController(ICatalogService catalog)
     {
-        _catalogService = catalogService;
-        _logger = logger;
+        _catalog = catalog;
     }
 
-    #region Categories
+    // ---------- Categories ----------
 
-    /// <summary>
-    /// Get all categories with pagination
-    /// </summary>
     [HttpGet("categories")]
-    [AllowAnonymous]
-    [ProducesResponseType(typeof(PagedResultDto<CategoryDto>), StatusCodes.Status200OK)]
-    public async Task<ActionResult<PagedResultDto<CategoryDto>>> GetCategories(
-        [FromQuery] int page = 1,
-        [FromQuery] int pageSize = 10,
-        [FromQuery] string? search = null)
-    {
-        var result = await _catalogService.GetCategoriesAsync(page, pageSize, search);
-        return Ok(result);
-    }
+    public async Task<ActionResult<PaginatedResult<CategoryDto>>> GetCategories([FromQuery] PaginationRequest request, [FromQuery] string? search, CancellationToken ct)
+        => Ok(await _catalog.GetCategoriesAsync(request, search, ct));
 
-    /// <summary>
-    /// Get category by ID
-    /// </summary>
     [HttpGet("categories/{id:guid}")]
-    [AllowAnonymous]
-    [ProducesResponseType(typeof(CategoryDto), StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<ActionResult<CategoryDto>> GetCategory(Guid id)
+    public async Task<ActionResult<CategoryDto>> GetCategoryById(Guid id, CancellationToken ct)
     {
-        var category = await _catalogService.GetCategoryByIdAsync(id);
-        if (category == null)
-        {
-            return NotFound(new { message = "Category not found" });
-        }
-        return Ok(category);
+        var item = await _catalog.GetCategoryByIdAsync(id, ct);
+        return item == null ? NotFound() : Ok(item);
     }
 
-    /// <summary>
-    /// Create a new category
-    /// </summary>
     [HttpPost("categories")]
-    [ProducesResponseType(typeof(CategoryDto), StatusCodes.Status201Created)]
-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    public async Task<ActionResult<CategoryDto>> CreateCategory([FromBody] CreateCategoryRequestDto request)
+    [Authorize(Policy = "LibrarianOrAdmin")]
+    public async Task<ActionResult<CategoryDto>> CreateCategory([FromBody] CreateCategoryRequest request, CancellationToken ct)
     {
-        var category = await _catalogService.CreateCategoryAsync(request);
-        return CreatedAtAction(nameof(GetCategory), new { id = category.Id }, category);
+        var item = await _catalog.CreateCategoryAsync(request, ct);
+        return CreatedAtAction(nameof(GetCategoryById), new { id = item.Id }, item);
     }
 
-    /// <summary>
-    /// Update category
-    /// </summary>
     [HttpPut("categories/{id:guid}")]
-    [ProducesResponseType(typeof(CategoryDto), StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<ActionResult<CategoryDto>> UpdateCategory(Guid id, [FromBody] UpdateCategoryRequestDto request)
+    [Authorize(Policy = "LibrarianOrAdmin")]
+    public async Task<ActionResult<CategoryDto>> UpdateCategory(Guid id, [FromBody] UpdateCategoryRequest request, CancellationToken ct)
     {
-        var category = await _catalogService.UpdateCategoryAsync(id, request);
-        if (category == null)
-        {
-            return NotFound(new { message = "Category not found" });
-        }
-        return Ok(category);
+        var item = await _catalog.UpdateCategoryAsync(id, request, ct);
+        return item == null ? NotFound() : Ok(item);
     }
 
-    /// <summary>
-    /// Delete category
-    /// </summary>
     [HttpDelete("categories/{id:guid}")]
-    [ProducesResponseType(StatusCodes.Status204NoContent)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<IActionResult> DeleteCategory(Guid id)
-    {
-        var result = await _catalogService.DeleteCategoryAsync(id);
-        if (!result)
-        {
-            return NotFound(new { message = "Category not found" });
-        }
-        return NoContent();
-    }
+    [Authorize(Policy = "AdminOnly")]
+    public async Task<IActionResult> DeleteCategory(Guid id, CancellationToken ct)
+        => await _catalog.DeleteCategoryAsync(id, ct) ? NoContent() : NotFound();
 
-    #endregion
+    // ---------- Publishers ----------
 
-    #region Publishers
-
-    /// <summary>
-    /// Get all publishers with pagination
-    /// </summary>
     [HttpGet("publishers")]
-    [AllowAnonymous]
-    [ProducesResponseType(typeof(PagedResultDto<PublisherDto>), StatusCodes.Status200OK)]
-    public async Task<ActionResult<PagedResultDto<PublisherDto>>> GetPublishers(
-        [FromQuery] int page = 1,
-        [FromQuery] int pageSize = 10,
-        [FromQuery] string? search = null)
-    {
-        var result = await _catalogService.GetPublishersAsync(page, pageSize, search);
-        return Ok(result);
-    }
+    public async Task<ActionResult<PaginatedResult<PublisherDto>>> GetPublishers([FromQuery] PaginationRequest request, [FromQuery] string? search, CancellationToken ct)
+        => Ok(await _catalog.GetPublishersAsync(request, search, ct));
 
-    /// <summary>
-    /// Get publisher by ID
-    /// </summary>
     [HttpGet("publishers/{id:guid}")]
-    [AllowAnonymous]
-    [ProducesResponseType(typeof(PublisherDto), StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<ActionResult<PublisherDto>> GetPublisher(Guid id)
+    public async Task<ActionResult<PublisherDto>> GetPublisherById(Guid id, CancellationToken ct)
     {
-        var publisher = await _catalogService.GetPublisherByIdAsync(id);
-        if (publisher == null)
-        {
-            return NotFound(new { message = "Publisher not found" });
-        }
-        return Ok(publisher);
+        var item = await _catalog.GetPublisherByIdAsync(id, ct);
+        return item == null ? NotFound() : Ok(item);
     }
 
-    /// <summary>
-    /// Create a new publisher
-    /// </summary>
     [HttpPost("publishers")]
-    [ProducesResponseType(typeof(PublisherDto), StatusCodes.Status201Created)]
-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    public async Task<ActionResult<PublisherDto>> CreatePublisher([FromBody] CreatePublisherRequestDto request)
+    [Authorize(Policy = "LibrarianOrAdmin")]
+    public async Task<ActionResult<PublisherDto>> CreatePublisher([FromBody] CreatePublisherRequest request, CancellationToken ct)
     {
-        var publisher = await _catalogService.CreatePublisherAsync(request);
-        return CreatedAtAction(nameof(GetPublisher), new { id = publisher.Id }, publisher);
+        var item = await _catalog.CreatePublisherAsync(request, ct);
+        return CreatedAtAction(nameof(GetPublisherById), new { id = item.Id }, item);
     }
 
-    /// <summary>
-    /// Update publisher
-    /// </summary>
     [HttpPut("publishers/{id:guid}")]
-    [ProducesResponseType(typeof(PublisherDto), StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<ActionResult<PublisherDto>> UpdatePublisher(Guid id, [FromBody] UpdatePublisherRequestDto request)
+    [Authorize(Policy = "LibrarianOrAdmin")]
+    public async Task<ActionResult<PublisherDto>> UpdatePublisher(Guid id, [FromBody] UpdatePublisherRequest request, CancellationToken ct)
     {
-        var publisher = await _catalogService.UpdatePublisherAsync(id, request);
-        if (publisher == null)
-        {
-            return NotFound(new { message = "Publisher not found" });
-        }
-        return Ok(publisher);
+        var item = await _catalog.UpdatePublisherAsync(id, request, ct);
+        return item == null ? NotFound() : Ok(item);
     }
 
-    /// <summary>
-    /// Delete publisher
-    /// </summary>
     [HttpDelete("publishers/{id:guid}")]
-    [ProducesResponseType(StatusCodes.Status204NoContent)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<IActionResult> DeletePublisher(Guid id)
-    {
-        var result = await _catalogService.DeletePublisherAsync(id);
-        if (!result)
-        {
-            return NotFound(new { message = "Publisher not found" });
-        }
-        return NoContent();
-    }
+    [Authorize(Policy = "AdminOnly")]
+    public async Task<IActionResult> DeletePublisher(Guid id, CancellationToken ct)
+        => await _catalog.DeletePublisherAsync(id, ct) ? NoContent() : NotFound();
 
-    #endregion
+    // ---------- Authors ----------
 
-    #region Authors
-
-    /// <summary>
-    /// Get all authors with pagination
-    /// </summary>
     [HttpGet("authors")]
-    [AllowAnonymous]
-    [ProducesResponseType(typeof(PagedResultDto<AuthorDto>), StatusCodes.Status200OK)]
-    public async Task<ActionResult<PagedResultDto<AuthorDto>>> GetAuthors(
-        [FromQuery] int page = 1,
-        [FromQuery] int pageSize = 10,
-        [FromQuery] string? search = null)
-    {
-        var result = await _catalogService.GetAuthorsAsync(page, pageSize, search);
-        return Ok(result);
-    }
+    public async Task<ActionResult<PaginatedResult<AuthorDto>>> GetAuthors([FromQuery] PaginationRequest request, [FromQuery] string? search, CancellationToken ct)
+        => Ok(await _catalog.GetAuthorsAsync(request, search, ct));
 
-    /// <summary>
-    /// Get author by ID
-    /// </summary>
     [HttpGet("authors/{id:guid}")]
-    [AllowAnonymous]
-    [ProducesResponseType(typeof(AuthorDto), StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<ActionResult<AuthorDto>> GetAuthor(Guid id)
+    public async Task<ActionResult<AuthorDto>> GetAuthorById(Guid id, CancellationToken ct)
     {
-        var author = await _catalogService.GetAuthorByIdAsync(id);
-        if (author == null)
-        {
-            return NotFound(new { message = "Author not found" });
-        }
-        return Ok(author);
+        var item = await _catalog.GetAuthorByIdAsync(id, ct);
+        return item == null ? NotFound() : Ok(item);
     }
 
-    /// <summary>
-    /// Create a new author
-    /// </summary>
     [HttpPost("authors")]
-    [ProducesResponseType(typeof(AuthorDto), StatusCodes.Status201Created)]
-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    public async Task<ActionResult<AuthorDto>> CreateAuthor([FromBody] CreateAuthorRequestDto request)
+    [Authorize(Policy = "LibrarianOrAdmin")]
+    public async Task<ActionResult<AuthorDto>> CreateAuthor([FromBody] CreateAuthorRequest request, CancellationToken ct)
     {
-        var author = await _catalogService.CreateAuthorAsync(request);
-        return CreatedAtAction(nameof(GetAuthor), new { id = author.Id }, author);
+        var item = await _catalog.CreateAuthorAsync(request, ct);
+        return CreatedAtAction(nameof(GetAuthorById), new { id = item.Id }, item);
     }
 
-    /// <summary>
-    /// Update author
-    /// </summary>
     [HttpPut("authors/{id:guid}")]
-    [ProducesResponseType(typeof(AuthorDto), StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<ActionResult<AuthorDto>> UpdateAuthor(Guid id, [FromBody] UpdateAuthorRequestDto request)
+    [Authorize(Policy = "LibrarianOrAdmin")]
+    public async Task<ActionResult<AuthorDto>> UpdateAuthor(Guid id, [FromBody] UpdateAuthorRequest request, CancellationToken ct)
     {
-        var author = await _catalogService.UpdateAuthorAsync(id, request);
-        if (author == null)
-        {
-            return NotFound(new { message = "Author not found" });
-        }
-        return Ok(author);
+        var item = await _catalog.UpdateAuthorAsync(id, request, ct);
+        return item == null ? NotFound() : Ok(item);
     }
 
-    /// <summary>
-    /// Delete author
-    /// </summary>
     [HttpDelete("authors/{id:guid}")]
-    [ProducesResponseType(StatusCodes.Status204NoContent)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<IActionResult> DeleteAuthor(Guid id)
-    {
-        var result = await _catalogService.DeleteAuthorAsync(id);
-        if (!result)
-        {
-            return NotFound(new { message = "Author not found" });
-        }
-        return NoContent();
-    }
+    [Authorize(Policy = "AdminOnly")]
+    public async Task<IActionResult> DeleteAuthor(Guid id, CancellationToken ct)
+        => await _catalog.DeleteAuthorAsync(id, ct) ? NoContent() : NotFound();
 
-    #endregion
+    // ---------- Books ----------
 
-    #region Books
-
-    /// <summary>
-    /// Get all books with pagination and filters
-    /// </summary>
     [HttpGet("books")]
-    [AllowAnonymous]
-    [ProducesResponseType(typeof(PagedResultDto<BookDto>), StatusCodes.Status200OK)]
-    public async Task<ActionResult<PagedResultDto<BookDto>>> GetBooks(
-        [FromQuery] int page = 1,
-        [FromQuery] int pageSize = 10,
-        [FromQuery] string? search = null,
-        [FromQuery] Guid? categoryId = null,
-        [FromQuery] Guid? publisherId = null,
-        [FromQuery] Guid? authorId = null,
-        [FromQuery] bool? isAvailable = null)
-    {
-        var result = await _catalogService.GetBooksAsync(page, pageSize, search, categoryId, publisherId, authorId, isAvailable);
-        return Ok(result);
-    }
+    public async Task<ActionResult<PaginatedResult<BookDto>>> GetBooks([FromQuery] CatalogPaginationRequest request, [FromQuery] string? search, CancellationToken ct)
+        => Ok(await _catalog.GetBooksAsync(request, request.CategoryId, request.PublisherId, search, ct));
 
-    /// <summary>
-    /// Get book by ID
-    /// </summary>
+    [HttpGet("books/search")]
+    public async Task<ActionResult<IEnumerable<BookSummaryDto>>> SearchBooks([FromQuery] string q, [FromQuery] int maxResults = 10, CancellationToken ct = default)
+        => Ok(await _catalog.SearchBooksAsync(q, maxResults, ct));
+
     [HttpGet("books/{id:guid}")]
-    [AllowAnonymous]
-    [ProducesResponseType(typeof(BookDto), StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<ActionResult<BookDto>> GetBook(Guid id)
+    public async Task<ActionResult<BookDto>> GetBookById(Guid id, CancellationToken ct)
     {
-        var book = await _catalogService.GetBookByIdAsync(id);
-        if (book == null)
-        {
-            return NotFound(new { message = "Book not found" });
-        }
-        return Ok(book);
+        var book = await _catalog.GetBookByIdAsync(id, ct);
+        return book == null ? NotFound() : Ok(book);
     }
 
-    /// <summary>
-    /// Create a new book
-    /// </summary>
     [HttpPost("books")]
-    [ProducesResponseType(typeof(BookDto), StatusCodes.Status201Created)]
-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    public async Task<ActionResult<BookDto>> CreateBook([FromBody] CreateBookRequestDto request)
+    [Authorize(Policy = "LibrarianOrAdmin")]
+    public async Task<ActionResult<BookDto>> CreateBook([FromBody] CreateBookRequest request, CancellationToken ct)
     {
-        var book = await _catalogService.CreateBookAsync(request);
-        return CreatedAtAction(nameof(GetBook), new { id = book.Id }, book);
+        var book = await _catalog.CreateBookAsync(request, ct);
+        return CreatedAtAction(nameof(GetBookById), new { id = book.Id }, book);
     }
 
-    /// <summary>
-    /// Update book
-    /// </summary>
     [HttpPut("books/{id:guid}")]
-    [ProducesResponseType(typeof(BookDto), StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<ActionResult<BookDto>> UpdateBook(Guid id, [FromBody] UpdateBookRequestDto request)
+    [Authorize(Policy = "LibrarianOrAdmin")]
+    public async Task<ActionResult<BookDto>> UpdateBook(Guid id, [FromBody] UpdateBookRequest request, CancellationToken ct)
     {
-        var book = await _catalogService.UpdateBookAsync(id, request);
-        if (book == null)
-        {
-            return NotFound(new { message = "Book not found" });
-        }
-        return Ok(book);
+        var book = await _catalog.UpdateBookAsync(id, request, ct);
+        return book == null ? NotFound() : Ok(book);
     }
 
-    /// <summary>
-    /// Delete book
-    /// </summary>
     [HttpDelete("books/{id:guid}")]
-    [ProducesResponseType(StatusCodes.Status204NoContent)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<IActionResult> DeleteBook(Guid id)
-    {
-        var result = await _catalogService.DeleteBookAsync(id);
-        if (!result)
-        {
-            return NotFound(new { message = "Book not found" });
-        }
-        return NoContent();
-    }
+    [Authorize(Policy = "AdminOnly")]
+    public async Task<IActionResult> DeleteBook(Guid id, CancellationToken ct)
+        => await _catalog.DeleteBookAsync(id, ct) ? NoContent() : NotFound();
 
-    /// <summary>
-    /// Add author to book
-    /// </summary>
-    [HttpPost("books/{bookId:guid}/authors")]
-    [ProducesResponseType(StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<IActionResult> AddAuthorToBook(Guid bookId, [FromBody] AddAuthorToBookRequestDto request)
-    {
-        var result = await _catalogService.AddAuthorToBookAsync(bookId, request.AuthorId);
-        if (!result)
-        {
-            return BadRequest(new { message = "Failed to add author. Book or author not found." });
-        }
-        return Ok(new { message = "Author added to book successfully" });
-    }
+    // ---------- Book copies ----------
 
-    /// <summary>
-    /// Remove author from book
-    /// </summary>
-    [HttpDelete("books/{bookId:guid}/authors/{authorId:guid}")]
-    [ProducesResponseType(StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<IActionResult> RemoveAuthorFromBook(Guid bookId, Guid authorId)
-    {
-        var result = await _catalogService.RemoveAuthorFromBookAsync(bookId, authorId);
-        if (!result)
-        {
-            return NotFound(new { message = "Book or author not found" });
-        }
-        return Ok(new { message = "Author removed from book successfully" });
-    }
+    [HttpGet("copies")]
+    [Authorize(Policy = "LibrarianOrAdmin")]
+    public async Task<ActionResult<PaginatedResult<BookCopyDto>>> GetCopies([FromQuery] PaginationRequest request, [FromQuery] Guid? bookId, [FromQuery] CopyStatus? status, CancellationToken ct)
+        => Ok(await _catalog.GetBookCopiesAsync(request, bookId, status, ct));
 
-    #endregion
-
-    #region Book Copies
-
-    /// <summary>
-    /// Get all book copies with pagination
-    /// </summary>
-    [HttpGet("books/{bookId:guid}/copies")]
-    [AllowAnonymous]
-    [ProducesResponseType(typeof(PagedResultDto<BookCopyDto>), StatusCodes.Status200OK)]
-    public async Task<ActionResult<PagedResultDto<BookCopyDto>>> GetBookCopies(
-        Guid bookId,
-        [FromQuery] int page = 1,
-        [FromQuery] int pageSize = 10,
-        [FromQuery] string? status = null)
-    {
-        var result = await _catalogService.GetBookCopiesAsync(bookId, page, pageSize, status);
-        return Ok(result);
-    }
-
-    /// <summary>
-    /// Get book copy by ID
-    /// </summary>
     [HttpGet("copies/{id:guid}")]
-    [AllowAnonymous]
-    [ProducesResponseType(typeof(BookCopyDto), StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<ActionResult<BookCopyDto>> GetBookCopy(Guid id)
+    [Authorize(Policy = "LibrarianOrAdmin")]
+    public async Task<ActionResult<BookCopyDto>> GetBookCopyById(Guid id, CancellationToken ct)
     {
-        var copy = await _catalogService.GetBookCopyByIdAsync(id);
-        if (copy == null)
-        {
-            return NotFound(new { message = "Book copy not found" });
-        }
-        return Ok(copy);
+        var copy = await _catalog.GetBookCopyByIdAsync(id, ct);
+        return copy == null ? NotFound() : Ok(copy);
     }
 
-    /// <summary>
-    /// Create a new book copy
-    /// </summary>
-    [HttpPost("books/{bookId:guid}/copies")]
-    [ProducesResponseType(typeof(BookCopyDto), StatusCodes.Status201Created)]
-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    public async Task<ActionResult<BookCopyDto>> CreateBookCopy(Guid bookId, [FromBody] CreateBookCopyRequestDto request)
+    [HttpPost("copies")]
+    [Authorize(Policy = "LibrarianOrAdmin")]
+    public async Task<ActionResult<BookCopyDto>> CreateBookCopy([FromBody] CreateBookCopyRequest request, CancellationToken ct)
     {
-        var copy = await _catalogService.CreateBookCopyAsync(bookId, request);
-        return CreatedAtAction(nameof(GetBookCopy), new { id = copy.Id }, copy);
+        var copy = await _catalog.CreateBookCopyAsync(request, ct);
+        return CreatedAtAction(nameof(GetBookCopyById), new { id = copy.Id }, copy);
     }
 
-    /// <summary>
-    /// Update book copy
-    /// </summary>
     [HttpPut("copies/{id:guid}")]
-    [ProducesResponseType(typeof(BookCopyDto), StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<ActionResult<BookCopyDto>> UpdateBookCopy(Guid id, [FromBody] UpdateBookCopyRequestDto request)
+    [Authorize(Policy = "LibrarianOrAdmin")]
+    public async Task<ActionResult<BookCopyDto>> UpdateBookCopy(Guid id, [FromBody] UpdateBookCopyRequest request, CancellationToken ct)
     {
-        var copy = await _catalogService.UpdateBookCopyAsync(id, request);
-        if (copy == null)
-        {
-            return NotFound(new { message = "Book copy not found" });
-        }
-        return Ok(copy);
+        var copy = await _catalog.UpdateBookCopyAsync(id, request, ct);
+        return copy == null ? NotFound() : Ok(copy);
     }
 
-    /// <summary>
-    /// Delete book copy
-    /// </summary>
     [HttpDelete("copies/{id:guid}")]
-    [ProducesResponseType(StatusCodes.Status204NoContent)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<IActionResult> DeleteBookCopy(Guid id)
-    {
-        var result = await _catalogService.DeleteBookCopyAsync(id);
-        if (!result)
-        {
-            return NotFound(new { message = "Book copy not found" });
-        }
-        return NoContent();
-    }
-
-    #endregion
+    [Authorize(Policy = "AdminOnly")]
+    public async Task<IActionResult> DeleteBookCopy(Guid id, CancellationToken ct)
+        => await _catalog.DeleteBookCopyAsync(id, ct) ? NoContent() : NotFound();
 }

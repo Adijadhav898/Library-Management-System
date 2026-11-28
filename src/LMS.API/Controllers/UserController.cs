@@ -1,150 +1,50 @@
-using LMS.Application.DTOs.User;
+using LMS.Application.DTOs;
 using LMS.Application.Interfaces;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace LMS.API.Controllers;
 
-[ApiController]
-[Route("api/[controller]")]
 [Authorize(Policy = "AdminOnly")]
-[Produces("application/json")]
-public class UserController : ControllerBase
+public class UserController : ApiControllerBase
 {
-    private readonly IUserService _userService;
-    private readonly ILogger<UserController> _logger;
+    private readonly IUserService _users;
 
-    public UserController(IUserService userService, ILogger<UserController> logger)
+    public UserController(IUserService users)
     {
-        _userService = userService;
-        _logger = logger;
+        _users = users;
     }
 
-    /// <summary>
-    /// Get all users with pagination and search
-    /// </summary>
     [HttpGet]
-    [ProducesResponseType(typeof(PagedResultDto<UserDto>), StatusCodes.Status200OK)]
-    public async Task<ActionResult<PagedResultDto<UserDto>>> GetUsers(
-        [FromQuery] int page = 1,
-        [FromQuery] int pageSize = 10,
-        [FromQuery] string? search = null,
-        [FromQuery] bool? isActive = null)
-    {
-        var result = await _userService.GetUsersAsync(page, pageSize, search, isActive);
-        return Ok(result);
-    }
+    public async Task<ActionResult<PaginatedResult<UserDto>>> GetAll([FromQuery] UserPaginationRequest request, [FromQuery] string? search, CancellationToken ct)
+        => Ok(await _users.GetAllAsync(request, search, request.RoleId, request.IsActive, ct));
 
-    /// <summary>
-    /// Get user by ID
-    /// </summary>
     [HttpGet("{id:guid}")]
-    [ProducesResponseType(typeof(UserDto), StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<ActionResult<UserDto>> GetUser(Guid id)
+    public async Task<ActionResult<UserDto>> GetById(Guid id, CancellationToken ct)
     {
-        var user = await _userService.GetUserByIdAsync(id);
-        if (user == null)
-        {
-            return NotFound(new { message = "User not found" });
-        }
-        return Ok(user);
+        var user = await _users.GetByIdAsync(id, ct);
+        return user == null ? NotFound() : Ok(user);
     }
 
-    /// <summary>
-    /// Create a new user (Admin only)
-    /// </summary>
     [HttpPost]
-    [ProducesResponseType(typeof(UserDto), StatusCodes.Status201Created)]
-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    [ProducesResponseType(StatusCodes.Status409Conflict)]
-    public async Task<ActionResult<UserDto>> CreateUser([FromBody] CreateUserRequestDto request)
+    public async Task<ActionResult<UserDto>> Create([FromBody] CreateUserRequest request, CancellationToken ct)
     {
-        try
-        {
-            var user = await _userService.CreateUserAsync(request);
-            return CreatedAtAction(nameof(GetUser), new { id = user.Id }, user);
-        }
-        catch (InvalidOperationException ex)
-        {
-            return Conflict(new { message = ex.Message });
-        }
+        var user = await _users.CreateAsync(request, ct);
+        return CreatedAtAction(nameof(GetById), new { id = user.Id }, user);
     }
 
-    /// <summary>
-    /// Update user
-    /// </summary>
     [HttpPut("{id:guid}")]
-    [ProducesResponseType(typeof(UserDto), StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<ActionResult<UserDto>> UpdateUser(Guid id, [FromBody] UpdateUserRequestDto request)
+    public async Task<ActionResult<UserDto>> Update(Guid id, [FromBody] UpdateUserRequest request, CancellationToken ct)
     {
-        var user = await _userService.UpdateUserAsync(id, request);
-        if (user == null)
-        {
-            return NotFound(new { message = "User not found" });
-        }
-        return Ok(user);
+        var user = await _users.UpdateAsync(id, request, ct);
+        return user == null ? NotFound() : Ok(user);
     }
 
-    /// <summary>
-    /// Delete user (soft delete)
-    /// </summary>
     [HttpDelete("{id:guid}")]
-    [ProducesResponseType(StatusCodes.Status204NoContent)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<IActionResult> DeleteUser(Guid id)
-    {
-        var result = await _userService.DeleteUserAsync(id);
-        if (!result)
-        {
-            return NotFound(new { message = "User not found" });
-        }
-        return NoContent();
-    }
+    public async Task<IActionResult> Delete(Guid id, CancellationToken ct)
+        => await _users.DeleteAsync(id, ct) ? NoContent() : NotFound();
 
-    /// <summary>
-    /// Assign role to user
-    /// </summary>
-    [HttpPost("{id:guid}/roles")]
-    [ProducesResponseType(StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<IActionResult> AssignRole(Guid id, [FromBody] AssignRoleRequestDto request)
-    {
-        var result = await _userService.AssignRoleAsync(id, request.RoleId);
-        if (!result)
-        {
-            return BadRequest(new { message = "Failed to assign role. User or role not found." });
-        }
-        return Ok(new { message = "Role assigned successfully" });
-    }
-
-    /// <summary>
-    /// Remove role from user
-    /// </summary>
-    [HttpDelete("{id:guid}/roles/{roleId:guid}")]
-    [ProducesResponseType(StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<IActionResult> RemoveRole(Guid id, Guid roleId)
-    {
-        var result = await _userService.RemoveRoleAsync(id, roleId);
-        if (!result)
-        {
-            return NotFound(new { message = "User or role not found" });
-        }
-        return Ok(new { message = "Role removed successfully" });
-    }
-
-    /// <summary>
-    /// Get all roles
-    /// </summary>
-    [HttpGet("roles")]
-    [ProducesResponseType(typeof(IEnumerable<RoleDto>), StatusCodes.Status200OK)]
-    public async Task<ActionResult<IEnumerable<RoleDto>>> GetRoles()
-    {
-        var roles = await _userService.GetRolesAsync();
-        return Ok(roles);
-    }
+    [HttpPatch("{id:guid}/toggle-active")]
+    public async Task<IActionResult> ToggleActive(Guid id, CancellationToken ct)
+        => await _users.ToggleActiveAsync(id, ct) ? Ok() : NotFound();
 }

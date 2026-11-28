@@ -40,9 +40,18 @@ using (var scope = app.Services.CreateScope())
 
     try
     {
-        logger.LogInformation("Applying database migrations...");
-        await dbContext.Database.MigrateAsync();
-        logger.LogInformation("Database migrations applied successfully");
+        // No migrations created yet -> create schema straight from the model.
+        
+        if (dbContext.Database.GetMigrations().Any())
+        {
+            logger.LogInformation("Applying database migrations...");
+            await dbContext.Database.MigrateAsync();
+        }
+        else
+        {
+            logger.LogInformation("No migrations found, creating database from model...");
+            await dbContext.Database.EnsureCreatedAsync();
+        }
 
         logger.LogInformation("Seeding database...");
         await DbSeeder.SeedAsync(dbContext);

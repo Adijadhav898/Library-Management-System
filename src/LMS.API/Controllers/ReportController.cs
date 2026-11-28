@@ -1,161 +1,45 @@
-using LMS.Application.DTOs.Report;
+using LMS.Application.DTOs;
 using LMS.Application.Interfaces;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace LMS.API.Controllers;
 
-[ApiController]
-[Route("api/[controller]")]
 [Authorize(Policy = "LibrarianOrAdmin")]
-[Produces("application/json")]
-public class ReportController : ControllerBase
+public class ReportController : ApiControllerBase
 {
-    private readonly IReportService _reportService;
-    private readonly ILogger<ReportController> _logger;
+    private readonly IReportService _reports;
 
-    public ReportController(IReportService reportService, ILogger<ReportController> logger)
+    public ReportController(IReportService reports)
     {
-        _reportService = reportService;
-        _logger = logger;
+        _reports = reports;
     }
 
-    /// <summary>
-    /// Get dashboard statistics
-    /// </summary>
     [HttpGet("dashboard")]
-    [ProducesResponseType(typeof(DashboardStatsDto), StatusCodes.Status200OK)]
-    public async Task<ActionResult<DashboardStatsDto>> GetDashboardStats()
-    {
-        var stats = await _reportService.GetDashboardStatsAsync();
-        return Ok(stats);
-    }
+    public async Task<ActionResult<DashboardStatsDto>> Dashboard(CancellationToken ct)
+        => Ok(await _reports.GetDashboardStatsAsync(ct));
 
-    /// <summary>
-    /// Get top borrowed books
-    /// </summary>
-    [HttpGet("top-books")]
-    [ProducesResponseType(typeof(IEnumerable<TopBookDto>), StatusCodes.Status200OK)]
-    public async Task<ActionResult<IEnumerable<TopBookDto>>> GetTopBorrowedBooks(
-        [FromQuery] int count = 10,
-        [FromQuery] DateTime? fromDate = null,
-        [FromQuery] DateTime? toDate = null)
-    {
-        var books = await _reportService.GetTopBorrowedBooksAsync(count, fromDate, toDate);
-        return Ok(books);
-    }
+    [HttpGet("top-borrowed-books")]
+    public async Task<ActionResult<IEnumerable<TopBorrowedBooksDto>>> TopBorrowedBooks([FromQuery] int count = 10, CancellationToken ct = default)
+        => Ok(await _reports.GetTopBorrowedBooksAsync(count, ct));
 
-    /// <summary>
-    /// Get top active members
-    /// </summary>
-    [HttpGet("top-members")]
-    [ProducesResponseType(typeof(IEnumerable<TopMemberDto>), StatusCodes.Status200OK)]
-    public async Task<ActionResult<IEnumerable<TopMemberDto>>> GetTopActiveMembers(
-        [FromQuery] int count = 10,
-        [FromQuery] DateTime? fromDate = null,
-        [FromQuery] DateTime? toDate = null)
-    {
-        var members = await _reportService.GetTopActiveMembersAsync(count, fromDate, toDate);
-        return Ok(members);
-    }
-
-    /// <summary>
-    /// Get overdue report
-    /// </summary>
-    [HttpGet("overdue")]
-    [ProducesResponseType(typeof(OverdueReportDto), StatusCodes.Status200OK)]
-    public async Task<ActionResult<OverdueReportDto>> GetOverdueReport(
-        [FromQuery] DateTime? fromDate = null,
-        [FromQuery] DateTime? toDate = null)
-    {
-        var report = await _reportService.GetOverdueReportAsync(fromDate, toDate);
-        return Ok(report);
-    }
-
-    /// <summary>
-    /// Get fines report
-    /// </summary>
-    [HttpGet("fines")]
-    [ProducesResponseType(typeof(FinesReportDto), StatusCodes.Status200OK)]
-    public async Task<ActionResult<FinesReportDto>> GetFinesReport(
-        [FromQuery] DateTime? fromDate = null,
-        [FromQuery] DateTime? toDate = null)
-    {
-        var report = await _reportService.GetFinesReportAsync(fromDate, toDate);
-        return Ok(report);
-    }
-
-    /// <summary>
-    /// Get circulation report
-    /// </summary>
-    [HttpGet("circulation")]
-    [ProducesResponseType(typeof(CirculationReportDto), StatusCodes.Status200OK)]
-    public async Task<ActionResult<CirculationReportDto>> GetCirculationReport(
-        [FromQuery] DateTime? fromDate = null,
-        [FromQuery] DateTime? toDate = null)
-    {
-        var report = await _reportService.GetCirculationReportAsync(fromDate, toDate);
-        return Ok(report);
-    }
-
-    /// <summary>
-    /// Get member activity report
-    /// </summary>
     [HttpGet("member-activity")]
-    [ProducesResponseType(typeof(MemberActivityReportDto), StatusCodes.Status200OK)]
-    public async Task<ActionResult<MemberActivityReportDto>> GetMemberActivityReport(
-        [FromQuery] Guid? memberId = null,
-        [FromQuery] DateTime? fromDate = null,
-        [FromQuery] DateTime? toDate = null)
-    {
-        var report = await _reportService.GetMemberActivityReportAsync(memberId, fromDate, toDate);
-        return Ok(report);
-    }
+    public async Task<ActionResult<IEnumerable<MemberActivityDto>>> MemberActivity([FromQuery] PaginationRequest request, CancellationToken ct)
+        => Ok(await _reports.GetMemberActivityAsync(request, ct));
 
-    /// <summary>
-    /// Get inventory report
-    /// </summary>
-    [HttpGet("inventory")]
-    [ProducesResponseType(typeof(InventoryReportDto), StatusCodes.Status200OK)]
-    public async Task<ActionResult<InventoryReportDto>> GetInventoryReport()
-    {
-        var report = await _reportService.GetInventoryReportAsync();
-        return Ok(report);
-    }
+    [HttpGet("category-stats")]
+    public async Task<ActionResult<IEnumerable<CategoryStatsDto>>> CategoryStats(CancellationToken ct)
+        => Ok(await _reports.GetCategoryStatsAsync(ct));
 
-    /// <summary>
-    /// Get revenue report
-    /// </summary>
-    [HttpGet("revenue")]
-    [Authorize(Policy = "AdminOnly")]
-    [ProducesResponseType(typeof(RevenueReportDto), StatusCodes.Status200OK)]
-    public async Task<ActionResult<RevenueReportDto>> GetRevenueReport(
-        [FromQuery] DateTime? fromDate = null,
-        [FromQuery] DateTime? toDate = null)
-    {
-        var report = await _reportService.GetRevenueReportAsync(fromDate, toDate);
-        return Ok(report);
-    }
+    [HttpGet("monthly-stats")]
+    public async Task<ActionResult<IEnumerable<MonthlyStatsDto>>> MonthlyStats([FromQuery] int? year, CancellationToken ct)
+        => Ok(await _reports.GetMonthlyStatsAsync(year ?? DateTime.UtcNow.Year, ct));
 
-    /// <summary>
-    /// Export report to CSV
-    /// </summary>
-    [HttpGet("export/{reportType}")]
-    [ProducesResponseType(typeof(FileContentResult), StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    public async Task<IActionResult> ExportReport(
-        string reportType,
-        [FromQuery] DateTime? fromDate = null,
-        [FromQuery] DateTime? toDate = null)
-    {
-        try
-        {
-            var (content, fileName, contentType) = await _reportService.ExportReportAsync(reportType, fromDate, toDate);
-            return File(content, contentType, fileName);
-        }
-        catch (ArgumentException ex)
-        {
-            return BadRequest(new { message = ex.Message });
-        }
-    }
+    [HttpGet("overdue")]
+    public async Task<ActionResult<PaginatedResult<OverdueReportDto>>> Overdue([FromQuery] PaginationRequest request, CancellationToken ct)
+        => Ok(await _reports.GetOverdueReportAsync(request, ct));
+
+    [HttpGet("fines")]
+    public async Task<ActionResult<PaginatedResult<FineReportDto>>> Fines([FromQuery] PaginationRequest request, CancellationToken ct)
+        => Ok(await _reports.GetFineReportAsync(request, ct));
 }
